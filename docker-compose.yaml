@@ -1,0 +1,9 @@
+services:
+  backend:
+    build: /backend
+    ports:
+      - "8000:5000"
+    environment:
+      - ADMIN_USER=admin
+      - ADMIN_PASSWORD=SECRET
+  frontend:
