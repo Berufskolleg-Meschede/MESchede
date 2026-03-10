@@ -6,7 +6,7 @@ RUN apk add --no-cache libc6-compat
 WORKDIR /app
 COPY package.json package.json
 COPY package-lock.json package-lock.json
-RUN npm run ci
+RUN npm install --omit=dev
 
 #Build the project
 FROM base as builder

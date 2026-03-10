@@ -3,19 +3,13 @@ services:
     image: postgres:18.1-alpine3.23
     env_file:
       - ./backend/.env.db
-    environment:
-      - DATABASE_URL = postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data/
   backend:
-    build: /backend
+    build: ./backend
     ports:
-      - "8000:5000"
+      - "8000:8000"
     env_file:
       - ./backend/.env
-  frontend:
-    build: /frontend
-    ports:
-      - "8080:80"
 volumes:
   postgres_data:

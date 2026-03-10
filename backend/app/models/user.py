@@ -1,5 +1,4 @@
 from sqlalchemy import Column, Integer, String, UUID
-from ..db.base import Base
 
 from sqlmodel import SQLModel, Field
 
