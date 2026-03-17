@@ -5,11 +5,17 @@ services:
       - ./backend/.env.db
     volumes:
       - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "5432:5432"
   backend:
     build: ./backend
     ports:
       - "8000:8000"
     env_file:
       - ./backend/.env
+    volumes:
+      - ./backend:/code
+    depends_on:
+      - db
 volumes:
   postgres_data:
