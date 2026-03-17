@@ -1,7 +1,13 @@
 from sqlalchemy import Column, Integer, String, UUID
-from ..db.base import Base
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(UUID, primary_key=True, index=True)
-    email = Column(String, unique=True, index=True)
+from sqlmodel import SQLModel, Field
+
+class UserBase(SQLModel):
+    email: str
+
+class User(UserBase, table=True):
+    id: int = Field(default=None, primary_key=True, nullable=False)
+
+class UserCreate(UserBase):
+    pass
+
