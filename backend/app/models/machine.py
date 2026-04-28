@@ -1,5 +1,3 @@
-from sqlalchemy import Column, Integer, UUID, String, Enum as SAEnum
-
 from .enums import MachineStatus
 
 from sqlmodel import SQLModel, Field

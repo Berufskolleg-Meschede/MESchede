@@ -5,14 +5,18 @@ from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 from alembic import context
 from sqlmodel import SQLModel
-import app.models
 
 load_dotenv("../.env", override=True)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
-database_url = os.getenv("ALEMBIC_DATABASE_URL")
+database_url = (
+    f"postgresql://{os.getenv('POSTGRES_USER')}:"
+    f"{os.getenv('POSTGRES_PASSWORD')}@"
+    f"localhost:{os.getenv('POSTGRES_PORT')}/"
+    f"{os.getenv('POSTGRES_DB')}"
+)
 if not database_url:
     raise RuntimeError("ALEMBIC_DATABASE_URL environment variable is not set")
 config.set_main_option('sqlalchemy.url', database_url)
