@@ -1,8 +1,9 @@
 from typing import Optional
 
-from sqlmodel import Field, Relationship
+from sqlmodel import Field, Relationship, SQLModel
 
-class StorageBase:
+
+class StorageBase(SQLModel):
     quantity: int
     article_id: int
 
