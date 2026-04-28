@@ -1,11 +1,18 @@
-class ProductionClient:
+from abc import ABC, abstractmethod
+from typing import Any
+
+
+class ProductionClient(ABC):
+    @abstractmethod
     def get_status(self) -> str:
         raise NotImplementedError
     
-    def post_order(self, order):
+    @abstractmethod
+    def post_order(self, order: Any) -> Any:
         raise NotImplementedError
     
-    def get_order_status(self, order_id):
+    @abstractmethod
+    def get_order_status(self, order_id: Any) -> Any:
         raise NotImplementedError
     
     
