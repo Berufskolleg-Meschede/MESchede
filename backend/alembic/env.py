@@ -7,7 +7,7 @@ from alembic import context
 from sqlmodel import SQLModel
 import app.models  # noqa: F401
 
-load_dotenv("../.env", override=True)
+load_dotenv("../.env.db", override=True)
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
