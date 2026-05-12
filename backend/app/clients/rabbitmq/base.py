@@ -17,10 +17,10 @@ class RabbitMQClient:
 		if not self.url:
 			raise RuntimeError("RABBITMQ_URL is not configured in .env")
 
-	def publish_storage_message(self, product_id: int, quantity: int) -> None:
+	def publish_storage_message(self, product_id: int, quantity_change: int) -> None:
 		payload = {
 			"product_id": product_id,
-			"quantity": quantity,
+			"quantity_delta": quantity_change,
 		}
 
 		connection = pika.BlockingConnection(pika.URLParameters(self.url))
@@ -37,5 +37,11 @@ class RabbitMQClient:
 			connection.close()
 
 
-def send_storage_message(product_id: int, quantity: int) -> None:
-	RabbitMQClient().publish_storage_message(product_id, quantity)
+def send_storage_message(product_id: int, quantity_change: int) -> None:
+	"""
+	Send a storage change event to RabbitMQ.
+	
+	:param product_id: The article ID
+	:param quantity_delta: The quantity change (positive for adding, negative for removing)
+	"""
+	RabbitMQClient().publish_storage_message(product_id, quantity_delta)
