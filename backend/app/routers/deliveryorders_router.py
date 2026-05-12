@@ -1,51 +1,119 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.db.db import get_session
+from app.models.delivery_order import DeliveryOrder, DeliveryOrderBase
+
 router = APIRouter(
     prefix="/deliveryorder",
     tags=["deliveryorder"]
 )
-@router.get("/")
-def list_deliveryorders():
-    """
-    List all deliveryorders
-    :return:All delivery orders"""
 
-    raise NotImplementedError("Method not implemented yet.")
-    #TODO: Implement getting all deliveryorders
+# GET ALL
+@router.get("/", response_model=list[DeliveryOrder])
+async def list_deliveryorders(
+    session: AsyncSession = Depends(get_session)
+):
+    result = await session.exec(
+        select(DeliveryOrder)
+    )
 
-@router.get("/{deliveryorder_id}")
-def get_deliveryorder(deliveryorder_id: str):
-    """
-    Get a single deliveryorder
-    :param deliveryorder_id: The id of the deliveryorder to get
-    :return: The deliveryorder with the given id"""
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement getting a single deliveryorder
+    return result.all()
 
-@router.post("/")
-def post_deliveryorder():
-    """
-    posts a single deliveryorder
-    :return: status of operation
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement creating a new deliveryorder
 
-@router.patch("/{deliveryorder_id}")
-def patch_deliveryorder(deliveryorder_id: str):
-    """
-    updates a single deliveryorder by its id
-    :param deliveryorder_id: the id of the deliveryorder to update
-    :return: the updated deliveryorder
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement updating a deliveryorder
+# GET ONE
+@router.get("/{deliveryorder_id}", response_model=DeliveryOrder)
+async def get_deliveryorder(
+    deliveryorder_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    deliveryorder = await session.get(
+        DeliveryOrder,
+        deliveryorder_id
+    )
 
+    if not deliveryorder:
+        raise HTTPException(
+            status_code=404,
+            detail="DeliveryOrder not found"
+        )
+
+    return deliveryorder
+
+
+# CREATE
+@router.post("/", response_model=DeliveryOrder)
+async def post_deliveryorder(
+    deliveryorder: DeliveryOrderBase,
+    session: AsyncSession = Depends(get_session)
+):
+    db_deliveryorder = DeliveryOrder(
+        **deliveryorder.model_dump()
+    )
+
+    session.add(db_deliveryorder)
+
+    await session.commit()
+    await session.refresh(db_deliveryorder)
+
+    return db_deliveryorder
+
+
+# UPDATE
+@router.patch("/{deliveryorder_id}", response_model=DeliveryOrder)
+async def patch_deliveryorder(
+    deliveryorder_id: int,
+    updated_data: DeliveryOrderBase,
+    session: AsyncSession = Depends(get_session)
+):
+    deliveryorder = await session.get(
+        DeliveryOrder,
+        deliveryorder_id
+    )
+
+    if not deliveryorder:
+        raise HTTPException(
+            status_code=404,
+            detail="DeliveryOrder not found"
+        )
+
+    update_data = updated_data.model_dump(
+        exclude_unset=True
+    )
+
+    for key, value in update_data.items():
+        setattr(deliveryorder, key, value)
+
+    session.add(deliveryorder)
+
+    await session.commit()
+    await session.refresh(deliveryorder)
+
+    return deliveryorder
+
+
+# DELETE
 @router.delete("/{deliveryorder_id}")
-def delete_deliveryorder(deliveryorder_id: str):
-    """
-    deletes a single deliveryorder by its id
-    :param deliveryorder_id:
-    :return: status of operation
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement deleting a deliveryorder
+async def delete_deliveryorder(
+    deliveryorder_id: int,
+    session: AsyncSession = Depends(get_session)
+):
+    deliveryorder = await session.get(
+        DeliveryOrder,
+        deliveryorder_id
+    )
+
+    if not deliveryorder:
+        raise HTTPException(
+            status_code=404,
+            detail="DeliveryOrder not found"
+        )
+
+    await session.delete(deliveryorder)
+
+    await session.commit()
+
+    return {
+        "message": "DeliveryOrder deleted"
+    }
