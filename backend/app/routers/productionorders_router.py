@@ -1,4 +1,9 @@
 from fastapi import APIRouter
+from clients.opc_ua_client import OpcUaClient
+
+from dotenv import load_dotenv
+import os
+
 router = APIRouter(
     prefix="/productionorder",
     tags=["productionorder"]
@@ -18,6 +23,7 @@ def get_productionorder(productionorder_id: str):
     Get a single productionorder
     :param productionorder_id: The id of the productionorder to get
     :return: The productionorder with the given id"""
+
     raise NotImplementedError("Method not implemented yet.")
     # TODO: Implement getting a single productionorder
 
@@ -27,6 +33,11 @@ def post_productionorder():
     posts a single productionorder
     :return: status of operation
     """
+
+    load_dotenv()  # Load environment variables from .env file for getting opc ua url
+    opc_ua_url = os.getenv("OPC_UA_URL")
+    opc_ua_client = OpcUaClient(opc_ua_url)
+
     raise NotImplementedError("Method not implemented yet.")
     # TODO: Implement creating a new productionorder
 
