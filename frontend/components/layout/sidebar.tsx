@@ -55,13 +55,8 @@ export function Sidebar() {
       {/* Header */}
       <div className="h-16 border-b border-sidebar-border flex items-center justify-between px-4">
         {!collapsed && <h2 className="font-bold text-sidebar-foreground">Navigation</h2>}
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => setCollapsed(!collapsed)}
-          className="h-8 w-8"
-        >
-          {collapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronLeft className="h-4 w-4" />}
+        <Button variant="ghost" size="icon" onClick={() => setCollapsed(!collapsed)}>
+          {collapsed ? <ChevronRight data-icon="inline-start" /> : <ChevronLeft data-icon="inline-start" />}
         </Button>
       </div>
 
@@ -82,7 +77,7 @@ export function Sidebar() {
                     : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
                 )}
               >
-                <Icon className="h-5 w-5 flex-shrink-0" />
+                <Icon data-icon="inline-start" />
                 {!collapsed && <span>{item.label}</span>}
               </Button>
             </Link>

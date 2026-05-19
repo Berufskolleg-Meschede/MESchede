@@ -4,6 +4,13 @@ import * as React from "react"
 import { AppLayout } from "@/components/layout/app-layout"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "@/components/ui/select"
 import { Plus } from "lucide-react"
 import { ProductionOrdersTable } from "@/components/tables/production-orders-table"
 
@@ -20,8 +27,8 @@ export default function ProductionOrdersPage() {
             <h1 className="text-3xl font-bold text-foreground">Production Orders</h1>
             <p className="text-muted-foreground mt-1">Manage and track production orders</p>
           </div>
-          <Button className="gap-2 bg-primary hover:bg-primary/90 text-primary-foreground">
-            <Plus className="h-4 w-4" />
+          <Button>
+            <Plus data-icon="inline-start" />
             New Order
           </Button>
         </div>
@@ -34,17 +41,18 @@ export default function ProductionOrdersPage() {
             onChange={(e) => setSearch(e.target.value)}
             className="max-w-sm"
           />
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-border bg-card text-foreground text-sm"
-          >
-            <option value="all">All Status</option>
-            <option value="PENDING">Pending</option>
-            <option value="IN_PROGRESS">In Progress</option>
-            <option value="COMPLETED">Completed</option>
-            <option value="ERROR">Error</option>
-          </select>
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(String(v))}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="All Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Status</SelectItem>
+              <SelectItem value="PENDING">Pending</SelectItem>
+              <SelectItem value="IN_PROGRESS">In Progress</SelectItem>
+              <SelectItem value="COMPLETED">Completed</SelectItem>
+              <SelectItem value="ERROR">Error</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Table */}

@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from clients.opc_ua_client import OpcUaClient
+from ..clients.opc_ua_client import OpcUaClient
 
 from dotenv import load_dotenv
 import os
@@ -28,7 +28,7 @@ def get_productionorder(productionorder_id: str):
     # TODO: Implement getting a single productionorder
 
 @router.post("/")
-def post_productionorder():
+async def post_productionorder():
     """
     posts a single productionorder
     :return: status of operation
@@ -38,11 +38,19 @@ def post_productionorder():
     opc_ua_url = os.getenv("OPC_UA_URL")
     opc_ua_client = OpcUaClient(opc_ua_url)
 
-    raise NotImplementedError("Method not implemented yet.")
+    try:
+        await opc_ua_client.connect()
+        mes_api_node = await opc_ua_client.find_db_mes_schnittstelle()
+        value = mes_api_node.get_value()
+        print(f"Current value of DB MES Schnittstelle: {value}")
+
+    except Exception as e:
+        print(f"Error during OPC UA operations: {e}")
+
     # TODO: Implement creating a new productionorder
 
 @router.patch("/{productionorder_id}")
-def patch_productionorder(productionorder_id: str):
+async def patch_productionorder(productionorder_id: str):
     """
     updates a single productionorder by its id
     :param productionorder_id: the id of the productionorder to update
@@ -52,7 +60,7 @@ def patch_productionorder(productionorder_id: str):
     # TODO: Implement updating a productionorder
 
 @router.delete("/{productionorder_id}")
-def delete_productionorder(productionorder_id: str):
+async def delete_productionorder(productionorder_id: str):
     """
     deletes a single productionorder by its id
     :param productionorder_id:

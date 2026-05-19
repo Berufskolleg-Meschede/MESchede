@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Card } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { useOrderStats } from "@/hooks/use-orders"
 
 export function OrderSummaryCards() {
@@ -31,21 +31,24 @@ export function OrderSummaryCards() {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {cards.map((card) => (
-        <Card key={card.label} className="p-6 border border-border">
-          <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide">
-            {card.label}
-          </h3>
-          <div className="mt-4 mb-6">
-            <p className="text-4xl font-bold text-foreground">{card.value}</p>
-          </div>
-          <div className="grid grid-cols-3 gap-4 text-xs">
-            {card.subItems.map((item) => (
-              <div key={item.label}>
-                <p className="text-muted-foreground">{item.label}</p>
-                <p className={`text-lg font-bold ${item.color}`}>{item.value}</p>
-              </div>
-            ))}
-          </div>
+        <Card key={card.label}>
+          <CardHeader>
+            <CardTitle className="text-sm uppercase tracking-wide">{card.label}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="mt-2 mb-4">
+              <p className="text-4xl font-bold text-foreground">{card.value}</p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4 text-xs">
+              {card.subItems.map((item) => (
+                <div key={item.label}>
+                  <p className="text-muted-foreground">{item.label}</p>
+                  <p className="text-lg font-bold text-foreground">{item.value}</p>
+                </div>
+              ))}
+            </div>
+          </CardContent>
         </Card>
       ))}
     </div>

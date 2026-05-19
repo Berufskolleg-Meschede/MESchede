@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Card } from "@/components/ui/card"
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import {
   Table,
   TableBody,
@@ -22,12 +22,12 @@ export function RecentOrders() {
   }
 
   return (
-    <Card className="p-6 border border-border">
-      <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-4">
-        Recent Orders
-      </h3>
-
-      <Table>
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm uppercase tracking-wide">Recent Orders</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <Table>
         <TableHeader>
           <TableRow className="border-border hover:bg-transparent">
             <TableHead className="text-xs font-semibold uppercase text-muted-foreground">
@@ -49,7 +49,7 @@ export function RecentOrders() {
         </TableHeader>
         <TableBody>
           {orders.map((order) => (
-            <TableRow key={order.id} className="border-border hover:bg-muted/50">
+            <TableRow key={order.id} className="border-border">
               <TableCell className="text-xs font-mono text-muted-foreground">
                 {order.type === "production" ? "PROD" : "DELV"}
               </TableCell>
@@ -65,6 +65,7 @@ export function RecentOrders() {
           ))}
         </TableBody>
       </Table>
+      </CardContent>
     </Card>
   )
 }
