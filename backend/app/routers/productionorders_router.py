@@ -1,8 +1,9 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, status
+from opcua import ua, Client
+from ..workers.production_queue import ProductionOrderPayload, order_queue
 from ..clients.opc_ua_client import OpcUaClient
-
 from dotenv import load_dotenv
-import os
+from os import environ
 
 router = APIRouter(
     prefix="/productionorder",
@@ -27,27 +28,41 @@ def get_productionorder(productionorder_id: str):
     raise NotImplementedError("Method not implemented yet.")
     # TODO: Implement getting a single productionorder
 
-@router.post("/")
-async def post_productionorder():
+@router.post("/", status_code=status.HTTP_202_ACCEPTED)
+async def post_productionorder(payload: ProductionOrderPayload):
     """
     posts a single productionorder
     :return: status of operation
     """
 
-    load_dotenv()  # Load environment variables from .env file for getting opc ua url
-    opc_ua_url = os.getenv("OPC_UA_URL")
-    opc_ua_client = OpcUaClient(opc_ua_url)
+    load_dotenv()
 
-    try:
-        await opc_ua_client.connect()
-        mes_api_node = await opc_ua_client.find_db_mes_schnittstelle()
-        value = mes_api_node.get_value()
-        print(f"Current value of DB MES Schnittstelle: {value}")
+    opc_client = OpcUaClient(url=environ.get("OPC_UA_URL"))
+    await opc_client.connect()
+    auftragssteuerung_node_id = environ.get("AUFTRAGSSTEUERUNG_NODE_ID")
+    mes_status_node_id = environ.get("STATUS_NODE_ID")
+    mes_status_node = opc_client.client.get_node(mes_status_node_id)
+    auftragssteuerung_node = opc_client.client.get_node(auftragssteuerung_node_id)
+    print("NodeClass:", auftragssteuerung_node.get_node_class())
+    print("DataType:", auftragssteuerung_node.get_data_type_as_variant_type())
+    print("Access:", auftragssteuerung_node.get_access_level(), auftragssteuerung_node.get_user_access_level())
+    dv = ua.DataValue(
+    ua.Variant(1, ua.VariantType.Byte)
+    )
 
+    try:   
+        # node.set_data_value(dv)
+        print(auftragssteuerung_node.get_data_value().Value.Value)
     except Exception as e:
-        print(f"Error during OPC UA operations: {e}")
-
-    # TODO: Implement creating a new productionorder
+        print(f"Error setting value on OPC UA server: {e}")
+    await opc_client.disconnect()
+    
+    ## await order_queue.put(payload)
+    # return {
+    #    "queued": True,
+    #    "order_id": payload.order_id,
+    #    "queue_size": order_queue.qsize(),
+    #}
 
 @router.patch("/{productionorder_id}")
 async def patch_productionorder(productionorder_id: str):
