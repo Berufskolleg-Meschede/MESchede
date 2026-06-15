@@ -50,6 +50,8 @@ async def post_productionorder(payload: ProductionOrderPayload):
     ua.Variant(1, ua.VariantType.Byte)
     )
 
+    auftragssteuerung_node.get_child()
+
     try:   
         # node.set_data_value(dv)
         print(auftragssteuerung_node.get_data_value().Value.Value)
