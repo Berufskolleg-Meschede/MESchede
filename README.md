@@ -24,7 +24,20 @@ The project follows a classic **three-tier architecture**:
 └──────────────────────────────────────────────────────────┘
 ```
 
-All three services are orchestrated together using **Docker Compose**.
+Storage changes are published to **RabbitMQ** (running on the NAS) so external services like the ERP can consume them asynchronously:
+
+```
+┌─────────────────────┐        AMQP         ┌─────────────────────┐
+│   FastAPI Backend   │ ──────────────────► │      RabbitMQ       │
+│     (Producer)      │                     │   Queue: storage    │
+└─────────────────────┘                     └──────────┬──────────┘
+                                                       │
+                                          ┌────────────▼────────────┐
+                                          │    ERP / Consumer(s)    │
+                                          └─────────────────────────┘
+```
+
+All three core services are orchestrated together using **Docker Compose**.
 
 ---
 
@@ -38,6 +51,7 @@ All three services are orchestrated together using **Docker Compose**.
 | Migrations | [Alembic](https://alembic.sqlalchemy.org/)      |
 | Database   | [PostgreSQL](https://www.postgresql.org/)       |
 | Container  | [Docker](https://www.docker.com/) / [Docker Compose](https://docs.docker.com/compose/) |
+| Messaging  | [RabbitMQ](https://www.rabbitmq.com/) via AMQP  |
 
 ---
 
@@ -58,6 +72,9 @@ MESchede/
 │   │   │   ├── machine.py
 │   │   │   ├── user.py
 │   │   │   └── enums.py
+│   │   ├── clients/
+│   │   │   └── rabbitmq/
+│   │   │       └── base.py      # RabbitMQ client & publisher
 │   │   ├── services/            # Business logic
 │   │   └── db/                  # Database connection and session management
 │   ├── alembic/                 # Database migration scripts
@@ -97,8 +114,6 @@ MESchede/
 
 ### External API (Azubi-ERP Integration)
 
-The backend integrates with an external Azubi-ERP system using the following endpoints:
-
 | Method | Endpoint     | Description                                        |
 |--------|--------------|----------------------------------------------------|
 | GET    | `/inventory` | Retrieve current inventory to check production readiness |
@@ -117,19 +132,19 @@ The backend integrates with an external Azubi-ERP system using the following end
 ### Running with Docker Compose
 
 1. Clone the repository:
-   ```bash
+```bash
    git clone https://github.com/Berufskolleg-Meschede/MESchede.git
    cd MESchede
-   ```
+```
 
 2. Create the required environment files:
-   - `backend/.env` – backend environment variables (database URL, etc.)
+   - `backend/.env` – backend environment variables (database URL, RabbitMQ URL, etc.)
    - `backend/.env.db` – PostgreSQL credentials
 
 3. Start all services:
-   ```bash
+```bash
    docker compose up --build
-   ```
+```
 
 4. The services will be available at:
    - **Frontend**: http://localhost:3000
@@ -156,6 +171,82 @@ npm run dev
 
 ---
 
+## RabbitMQ Integration
+
+### Übersicht
+Das MES nutzt RabbitMQ als Message Broker um Lagermengen-Änderungen als Nachrichten zu publishen.
+Andere Services (z.B. ERP) können diese Nachrichten unabhängig aus der Queue abholen und verarbeiten.
+
+RabbitMQ läuft als Docker-Container auf dem NAS und ist über folgende Ports erreichbar:
+
+| Zweck          | Port  |
+|----------------|-------|
+| AMQP (Backend) | 50450 |
+| Web-UI         | 50451 |
+
+### Konfiguration
+Die Verbindungsdaten werden über eine `.env`-Datei konfiguriert. Eine `.env.example` liegt im Repository:
+
+```env
+RABBITMQ_URL=amqp://<user>:<password>@<host>:<port>/
+```
+
+Die echten Zugangsdaten sind nicht im Repository — bei einem Teammitglied oder dem NAS-Admin erfragen.
+
+### Nachrichten publishen
+
+```python
+from app.clients.rabbitmq.base import send_storage_message
+
+send_storage_message(product_id=42, quantity_delta=-5)
+```
+
+Jede Nachricht hat folgendes Format:
+```json
+{
+  "product_id": 42,
+  "quantity_delta": -5
+}
+```
+
+`quantity_delta` ist positiv beim Einlagern und negativ beim Auslagern.
+
+### Klasse direkt verwenden
+
+```python
+from app.clients.rabbitmq.base import RabbitMQClient
+
+with RabbitMQClient() as client:
+    client.publish_storage_message(product_id=1, quantity_delta=-3)
+    client.publish_storage_message(product_id=2, quantity_delta=+10)
+```
+
+### Nachrichten in der Web-UI prüfen
+1. Web-UI öffnen: Host und Port aus der `.env` entnehmen
+2. Login mit den Zugangsdaten aus der `.env`
+3. **Queues → storage → Get Messages** um Nachrichten einzusehen
+
+### Consumer hinzufügen
+
+```python
+import pika, json, os
+
+connection = pika.BlockingConnection(pika.URLParameters(os.getenv("RABBITMQ_URL")))
+channel = connection.channel()
+channel.queue_declare(queue="storage", durable=True)
+
+def callback(ch, method, properties, body):
+    nachricht = json.loads(body)
+    print(f"Empfangen: {nachricht}")
+    ch.basic_ack(delivery_tag=method.delivery_tag)
+
+channel.basic_qos(prefetch_count=1)
+channel.basic_consume(queue="storage", on_message_callback=callback)
+channel.start_consuming()
+```
+
+---
+
 ## Design Decisions
 
 - **FastAPI** was chosen for the backend because of its automatic OpenAPI/Swagger documentation, type-safety via Pydantic, and high performance.
@@ -163,10 +254,10 @@ npm run dev
 - **Alembic** handles database schema migrations in a controlled and versioned way.
 - **Next.js** provides server-side rendering capabilities and a strong developer experience for the frontend.
 - **Docker Compose** simplifies local development and deployment by bundling all services together.
+- **RabbitMQ via AMQP** was chosen over MQTT because it is the native protocol of RabbitMQ with full support for queues, routing, and guaranteed message delivery — without additional plugins or configuration.
 
 ---
 
 ## Contributing
 
 This is a school project. Contributions from students at Berufskolleg Meschede are welcome. Please open an issue or pull request for any improvements.
-
