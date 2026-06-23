@@ -1,19 +1,20 @@
 import asyncio
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from ..clients.opc_ua_client import OpcUaClient
+from ..models.mes_auftrag import MESAuftrag
 
 logger = logging.getLogger(__name__)
 
 
 class ProductionOrderPayload(BaseModel):
     order_id: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    mes_auftrag: MESAuftrag
 
 
 order_queue: asyncio.Queue = asyncio.Queue()
@@ -26,9 +27,7 @@ def get_queue_size() -> int:
 
 
 def get_current_order_id() -> Optional[str]:
-    if _current_order is None:
-        return None
-    return _current_order.order_id
+    return _current_order.order_id if _current_order else None
 
 
 async def start_worker() -> None:
@@ -52,11 +51,13 @@ async def stop_worker() -> None:
 
 async def _worker_loop() -> None:
     opc_client: Optional[OpcUaClient] = None
+    root_node = None
     try:
         while True:
             if opc_client is None:
                 try:
                     opc_client = await _create_client()
+                    root_node = await _get_root_node(opc_client)
                 except Exception:
                     logger.exception("Failed to create OPC UA client")
                     await asyncio.sleep(2.0)
@@ -65,17 +66,19 @@ async def _worker_loop() -> None:
             global _current_order
             _current_order = order
             try:
-                await _wait_for_plc_ready(opc_client)
-                await _send_order(opc_client, order)
-                await _wait_for_plc_done(opc_client)
+                await _wait_for_plc_ready(opc_client, root_node)
+                await asyncio.sleep(3.0)
+                await _send_order(opc_client, root_node, order)
+                await _wait_for_plc_done(opc_client, root_node)
                 logger.info("Order processed", extra={"order_id": order.order_id})
-            except Exception as exc:
+            except Exception:
                 logger.exception("Order processing failed", extra={"order_id": order.order_id})
                 try:
                     await opc_client.disconnect()
                 except Exception:
-                    logger.exception("Failed to disconnect OPC UA client after error")
+                    logger.exception("Failed to disconnect after error")
                 opc_client = None
+                root_node = None
             finally:
                 _current_order = None
                 order_queue.task_done()
@@ -86,7 +89,7 @@ async def _worker_loop() -> None:
             try:
                 await opc_client.disconnect()
             except Exception:
-                logger.exception("Failed to disconnect OPC UA client during shutdown")
+                logger.exception("Failed to disconnect during shutdown")
 
 
 async def _create_client() -> OpcUaClient:
@@ -95,36 +98,36 @@ async def _create_client() -> OpcUaClient:
     if not opc_ua_url:
         raise RuntimeError("OPC_UA_URL is not set")
     client = OpcUaClient(opc_ua_url)
-    connected = await client.connect()
-    if connected is False:
+    if await client.connect() is False:
         raise RuntimeError("Failed to connect to OPC UA server")
     return client
 
 
-async def _wait_for_plc_ready(opc_client: OpcUaClient, timeout_s: float = 30.0) -> None:
+async def _get_root_node(opc_client: OpcUaClient):
+    db_node = await opc_client.find_db_mes_schnittstelle()
+    return opc_client._get_child(db_node, "MESAuftragProduktion")
+
+
+async def _wait_for_plc_ready(opc_client: OpcUaClient, root_node, timeout_s: float = 30.0) -> None:
     loop = asyncio.get_running_loop()
     start = loop.time()
     while True:
-        ready = True
-        if ready:
+        if opc_client.read_auftragssteuerung(root_node) == 0:
             return
         if loop.time() - start >= timeout_s:
             raise TimeoutError("PLC not ready within timeout")
         await asyncio.sleep(0.5)
 
 
-async def _send_order(opc_client: OpcUaClient, order: ProductionOrderPayload) -> None:
-    _ = opc_client
-    _ = order
-    # TODO: write order payload to the correct OPC UA nodes.
+async def _send_order(opc_client: OpcUaClient, root_node, order: ProductionOrderPayload) -> None:
+    opc_client.write_order(root_node, order.mes_auftrag)
 
 
-async def _wait_for_plc_done(opc_client: OpcUaClient, timeout_s: float = 600.0) -> None:
+async def _wait_for_plc_done(opc_client: OpcUaClient, root_node, timeout_s: float = 600.0) -> None:
     loop = asyncio.get_running_loop()
     start = loop.time()
     while True:
-        done = True
-        if done:
+        if opc_client.read_auftragssteuerung(root_node) == 0:
             return
         if loop.time() - start >= timeout_s:
             raise TimeoutError("PLC did not finish within timeout")
