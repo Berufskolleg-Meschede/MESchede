@@ -1,4 +1,5 @@
 # MESchede
+<img width="1408" height="768" alt="MESchede_logo" src="https://github.com/user-attachments/assets/9758b6bb-5531-4954-ba74-01026f9bc85c" />
 
 A school project developed at **Berufskolleg Meschede** that implements a lightweight manufacturing execution system (MES). The application manages production orders, delivery orders, storage/inventory, and factory sites, and integrates with an external **Azubi-ERP** system.
 
