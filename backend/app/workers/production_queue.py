@@ -104,15 +104,17 @@ async def _create_client() -> OpcUaClient:
 
 
 async def _get_root_node(opc_client: OpcUaClient):
+    loop = asyncio.get_running_loop()
     db_node = await opc_client.find_db_mes_schnittstelle()
-    return opc_client._get_child(db_node, "MESAuftragProduktion")
+    return await loop.run_in_executor(None, opc_client._get_child, db_node, "MESAuftragProduktion")
 
 
 async def _wait_for_plc_ready(opc_client: OpcUaClient, root_node, timeout_s: float = 30.0) -> None:
     loop = asyncio.get_running_loop()
     start = loop.time()
     while True:
-        if opc_client.read_auftragssteuerung(root_node) == 0:
+        value = await loop.run_in_executor(None, opc_client.read_auftragssteuerung, root_node)
+        if value == 0:
             return
         if loop.time() - start >= timeout_s:
             raise TimeoutError("PLC not ready within timeout")
@@ -120,14 +122,16 @@ async def _wait_for_plc_ready(opc_client: OpcUaClient, root_node, timeout_s: flo
 
 
 async def _send_order(opc_client: OpcUaClient, root_node, order: ProductionOrderPayload) -> None:
-    opc_client.write_order(root_node, order.mes_auftrag)
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, opc_client.write_order, root_node, order.mes_auftrag, 1)
 
 
 async def _wait_for_plc_done(opc_client: OpcUaClient, root_node, timeout_s: float = 600.0) -> None:
     loop = asyncio.get_running_loop()
     start = loop.time()
     while True:
-        if opc_client.read_auftragssteuerung(root_node) == 0:
+        value = await loop.run_in_executor(None, opc_client.read_auftragssteuerung, root_node)
+        if value == 0:
             return
         if loop.time() - start >= timeout_s:
             raise TimeoutError("PLC did not finish within timeout")

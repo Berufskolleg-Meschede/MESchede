@@ -1,5 +1,5 @@
 from datetime import date, time
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 import pytest
 
 from opcua import ua
@@ -66,21 +66,20 @@ def test_read_auftragssteuerung_returns_value():
 def test_write_order_sets_auftragssteuerung_to_1():
     client = _make_client()
 
-    # Build a minimal mock tree: root → Kopf → {Auftragsnummer, Kundennummer,
-    # Startdatum, Startzeit, AuftragsArt, Priorität, Parameter, Auftragssteuerung}
-    # root → Inhalt → {ProduktID, Anzahl, SeriennummerStart}
-    def make_kopf_children():
-        names = [
+    kopf_children = [
+        _make_mock_node(n) for n in [
             "Auftragsnummer", "Kundennummer", "Startdatum", "Startzeit",
-            "AuftragsArt", "Priorität", "Parameter", "Auftragssteuerung",
+            "AuftragsArt", "Priorität", "Parameter", "Anzahl", "Auftragssteuerung",
         ]
-        return [_make_mock_node(n) for n in names]
+    ]
 
-    def make_inhalt_children():
-        return [_make_mock_node(n) for n in ["ProduktID", "Anzahl", "SeriennummerStart"]]
+    produkt0_children = [
+        _make_mock_node(n) for n in ["ProduktID", "Produkttext", "Seriennummer", "Sequenznummer", "Takt"]
+    ]
+    produkt0 = _make_mock_node("Produktqueue[0]")
+    produkt0.get_children.return_value = produkt0_children
 
-    kopf_children = make_kopf_children()
-    inhalt_children = make_inhalt_children()
+    inhalt_children = [_make_mock_node("Anzahl"), _make_mock_node("SeriennummerStart"), produkt0]
 
     kopf = _make_mock_node("Kopf")
     kopf.get_children.return_value = kopf_children
@@ -94,14 +93,14 @@ def test_write_order_sets_auftragssteuerung_to_1():
             Auftragsnummer=1,
             Startdatum=date(2026, 6, 23),
             Startzeit=time(8, 0),
-            AuftragsArt=1,
         ),
-        inhalt=AuftragInhalt(ProduktID=42, Anzahl=5),
+        inhalt=AuftragInhalt(
+            Produktqueue=[ProduktDaten(ProduktID=42)],
+        ),
     )
 
-    client.write_order(root, order)
+    client.write_order(root, order, auftragsart=1)
 
-    # The Auftragssteuerung node is the last child in kopf_children
     auftragssteuerung_node = next(
         n for n in kopf_children if n.get_browse_name().Name == "Auftragssteuerung"
     )

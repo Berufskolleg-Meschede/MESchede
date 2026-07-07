@@ -1,3 +1,4 @@
+import asyncio
 from datetime import date, time as dt_time, datetime
 from typing import Any
 
@@ -13,16 +14,18 @@ class OpcUaClient(ProductionClient):
         self.client = Client(url)
 
     async def connect(self):
+        loop = asyncio.get_running_loop()
         try:
-            self.client.connect()
+            await loop.run_in_executor(None, self.client.connect)
             print("Connected to OPC UA server")
         except Exception as e:
             print(f"Error connecting to OPC UA server: {e}")
             return False
 
     async def disconnect(self):
+        loop = asyncio.get_running_loop()
         try:
-            self.client.disconnect()
+            await loop.run_in_executor(None, self.client.disconnect)
             print("Disconnected from OPC UA server")
         except Exception as e:
             print(f"Error disconnecting from OPC UA server: {e}")
@@ -46,8 +49,9 @@ class OpcUaClient(ProductionClient):
         namespace_index: int | None = None,
         node=None,
     ):
+        loop = asyncio.get_running_loop()
         root = node or self.client.get_root_node()
-        return self._find_node_by_name_sync(root, name, namespace_index)
+        return await loop.run_in_executor(None, self._find_node_by_name_sync, root, name, namespace_index)
 
     def _find_node_by_name_sync(self, node, name: str, namespace_index: int | None):
         browse_name = node.get_browse_name()
@@ -88,14 +92,16 @@ class OpcUaClient(ProductionClient):
             value = datetime(1970, 1, 1, value.hour, value.minute, value.second)
         node.set_data_value(ua.DataValue(ua.Variant(value, existing_vtype)))
 
-    def write_order(self, root_node, order: MESAuftrag) -> None:
+    def write_order(self, root_node, order: MESAuftrag, auftragsart: int) -> None:
         kopf_node = self._get_child(root_node, "Kopf")
         for field_name, value in order.kopf.model_dump().items():
             self._write_field(kopf_node, field_name, value)
+        self._write_field(kopf_node, "AuftragsArt", auftragsart)
+        self._write_field(kopf_node, "Anzahl", len(order.inhalt.Produktqueue))
 
         inhalt_node = self._get_child(root_node, "Inhalt")
-        for field_name in ("ProduktID", "Anzahl", "SeriennummerStart"):
-            self._write_field(inhalt_node, field_name, getattr(order.inhalt, field_name))
+        self._write_field(inhalt_node, "Anzahl", len(order.inhalt.Produktqueue))
+        self._write_field(inhalt_node, "SeriennummerStart", order.inhalt.SeriennummerStart)
 
         for i, produkt in enumerate(order.inhalt.Produktqueue):
             item_node = self._get_child(inhalt_node, f"Produktqueue[{i}]")

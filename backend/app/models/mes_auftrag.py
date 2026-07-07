@@ -3,18 +3,16 @@ from pydantic import BaseModel
 
 
 class ProduktDaten(BaseModel):
+    ProduktID: int
     Produkttext: str = ""
-    ProduktID: int = 0
     Seriennummer: int = 0
     Sequenznummer: int = 0
     Takt: int = 0
 
 
 class AuftragInhalt(BaseModel):
-    ProduktID: int
-    Anzahl: int
+    Produktqueue: list[ProduktDaten]  # one entry per unit; Anzahl is derived from len(Produktqueue)
     SeriennummerStart: int = 0
-    Produktqueue: list[ProduktDaten] = []
 
 
 class AuftragKopf(BaseModel):
@@ -22,10 +20,9 @@ class AuftragKopf(BaseModel):
     Kundennummer: int = 0
     Startdatum: date
     Startzeit: time
-    AuftragsArt: int  # 1=Produktion, 4=Kommissionieren
     Prioritaet: int = 1  # 0=Niedrig, 1=Normal, 2=Hoch — maps to OPC UA node "Priorität"
     Parameter: int = 0
-    # Auftragssteuerung is NOT in the model — worker writes it directly
+    # AuftragsArt and Auftragssteuerung are NOT in the model — workers write them directly
 
 
 class MESAuftrag(BaseModel):
