@@ -97,7 +97,6 @@ class OpcUaClient(ProductionClient):
         for field_name, value in order.kopf.model_dump().items():
             self._write_field(kopf_node, field_name, value)
         self._write_field(kopf_node, "AuftragsArt", auftragsart)
-        self._write_field(kopf_node, "Anzahl", len(order.inhalt.Produktqueue))
 
         inhalt_node = self._get_child(root_node, "Inhalt")
         self._write_field(inhalt_node, "Anzahl", len(order.inhalt.Produktqueue))

@@ -69,7 +69,7 @@ def test_write_order_sets_auftragssteuerung_to_1():
     kopf_children = [
         _make_mock_node(n) for n in [
             "Auftragsnummer", "Kundennummer", "Startdatum", "Startzeit",
-            "AuftragsArt", "Priorität", "Parameter", "Anzahl", "Auftragssteuerung",
+            "AuftragsArt", "Priorität", "Parameter", "Auftragssteuerung",
         ]
     ]
 
@@ -79,7 +79,12 @@ def test_write_order_sets_auftragssteuerung_to_1():
     produkt0 = _make_mock_node("Produktqueue[0]")
     produkt0.get_children.return_value = produkt0_children
 
-    inhalt_children = [_make_mock_node("Anzahl"), _make_mock_node("SeriennummerStart"), produkt0]
+    inhalt_children = [
+        _make_mock_node("ProduktID"),
+        _make_mock_node("Anzahl"),
+        _make_mock_node("SeriennummerStart"),
+        produkt0,
+    ]
 
     kopf = _make_mock_node("Kopf")
     kopf.get_children.return_value = kopf_children
@@ -100,6 +105,12 @@ def test_write_order_sets_auftragssteuerung_to_1():
     )
 
     client.write_order(root, order, auftragsart=1)
+
+    anzahl_node = next(
+        n for n in inhalt_children if n.get_browse_name().Name == "Anzahl"
+    )
+    anzahl_node.set_data_value.assert_called_once()
+    assert anzahl_node.set_data_value.call_args[0][0].Value.Value == 1
 
     auftragssteuerung_node = next(
         n for n in kopf_children if n.get_browse_name().Name == "Auftragssteuerung"
