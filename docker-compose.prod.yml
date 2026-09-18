@@ -1,5 +1,5 @@
 services:
-  db:
+  mes-db:
     image: postgres:18.1-alpine3.23
     container_name: MES-Postgres
     restart: unless-stopped
@@ -7,7 +7,9 @@ services:
     volumes:
       - postgres_mes_data:/var/lib/postgresql/data
     networks:
-      - backend
+      mes-backend:
+        aliases:
+          - db
 
   backend:
     image: ghcr.io/berufskolleg-meschede/meschede-backend:latest
@@ -15,9 +17,9 @@ services:
     restart: unless-stopped
     env_file: ./backend/.env
     depends_on:
-      - db
+      - mes-db
     networks:
-      - backend
+      - mes-backend
       - SmartFactory
     labels:
       - "traefik.enable=true"
@@ -25,7 +27,7 @@ services:
       - "traefik.http.routers.mes-api.entrypoints=web"
       - "traefik.http.services.mes-api.loadbalancer.server.port=8000"
 
-  frontend:
+  mes-frontend:
     image: ghcr.io/berufskolleg-meschede/meschede-frontend:latest
     container_name: MES-Frontend
     restart: unless-stopped
@@ -41,8 +43,7 @@ volumes:
   postgres_mes_data:
 
 networks:
-  backend:
+  mes-backend:
     driver: bridge
   SmartFactory:
-    external: true
     name: SmartFactory
