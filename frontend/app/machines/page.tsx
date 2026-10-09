@@ -1,5 +1,3 @@
 export default function Machine() {
-    return (
-
-    )
+    return null
 }

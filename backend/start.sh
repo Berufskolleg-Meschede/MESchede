@@ -1,8 +1,6 @@
 #!/bin/sh
 set -e
 
-#Warten auf Datenbank Erreichbarkeit
-sleep 5
 echo "Doing alembic migrations..."
 alembic upgrade head
 
