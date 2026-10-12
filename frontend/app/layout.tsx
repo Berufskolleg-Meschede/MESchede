@@ -1,15 +1,6 @@
 import type { Metadata } from 'next'
-import { Geist, Geist_Mono, Barlow_Condensed } from 'next/font/google'
 import './globals.css'
 import { Sidebar } from '@/components/sidebar'
-
-const geistSans = Geist({ variable: '--font-geist-sans', subsets: ['latin'] })
-const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin'] })
-const barlowCondensed = Barlow_Condensed({
-  variable: '--font-barlow-condensed',
-  subsets: ['latin'],
-  weight: ['600', '700'],
-})
 
 export const metadata: Metadata = {
   title: 'MESchede MES',
@@ -20,12 +11,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html
       lang="de"
-      className={`dark ${geistSans.variable} ${geistMono.variable} ${barlowCondensed.variable}`}
+      className="dark"
     >
       <body className="antialiased">
-        <div className="flex h-screen bg-background">
+        <div className="flex min-h-screen flex-col bg-background md:h-screen md:flex-row">
           <Sidebar />
-          <main className="flex-1 overflow-auto">{children}</main>
+          <main className="min-w-0 flex-1 md:overflow-auto">{children}</main>
         </div>
       </body>
     </html>

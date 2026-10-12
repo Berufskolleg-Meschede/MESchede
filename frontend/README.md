@@ -5,6 +5,7 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 First, run the development server:
 
 ```bash
+npm install
 npm run dev
 # or
 yarn dev
@@ -16,9 +17,14 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+The home page redirects to the dashboard. Production and delivery orders are
+available from the sidebar. The frontend currently uses in-memory demo data
+(`USE_MOCK` in `lib/api.ts`), so it runs without the backend. Demo changes reset
+when the page is refreshed.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+The interface uses system fonts, so starting and building the frontend does not require downloading fonts.
 
 ## Learn More
 
