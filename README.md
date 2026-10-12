@@ -3,15 +3,11 @@
 
 A school project developed at **Berufskolleg Meschede** that implements a lightweight manufacturing execution system (MES). The application manages production orders, delivery orders, storage/inventory, and factory sites, and integrates with an external **Azubi-ERP** system.
 
-<<<<<<< HEAD
-/order
-GET to receive newest information about orders and how to execute them
-
 ## OPC UA integration
 
 See [the current PLC handshake and offline testing guide](docs/opc-ua-integration.md).
 An example production request is saved in `backend/examples/production-order.json`.
-=======
+
 ---
 
 ## Architecture Overview
@@ -271,4 +267,3 @@ channel.start_consuming()
 ## Contributing
 
 This is a school project. Contributions from students at Berufskolleg Meschede are welcome. Please open an issue or pull request for any improvements.
->>>>>>> origin/main

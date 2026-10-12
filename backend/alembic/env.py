@@ -2,29 +2,10 @@ from logging.config import fileConfig
 from sqlalchemy import create_engine, pool
 from alembic import context
 from sqlmodel import SQLModel
-<<<<<<< HEAD
 from app.db.url import get_postgres_url
 
 # Alembic Config object
 config = context.config
-=======
-import app.models  # noqa: F401
-
-load_dotenv("../.env.db", override=True)
-
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
-config = context.config
-database_url = (
-    f"postgresql://{os.getenv('POSTGRES_USER')}:"
-    f"{os.getenv('POSTGRES_PASSWORD')}@"
-    f"{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/"
-    f"{os.getenv('POSTGRES_DB')}"
-)
-if not database_url:
-    raise RuntimeError("ALEMBIC_DATABASE_URL environment variable is not set")
-config.set_main_option('sqlalchemy.url', database_url)
->>>>>>> origin/main
 
 # Set up logging
 if config.config_file_name is not None:

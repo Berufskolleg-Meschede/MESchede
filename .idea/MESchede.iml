@@ -2,19 +2,12 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
-<<<<<<< HEAD
-=======
       <sourceFolder url="file://$MODULE_DIR$/backend" isTestSource="false" />
->>>>>>> origin/main
       <excludeFolder url="file://$MODULE_DIR$/backend/.venv" />
       <excludeFolder url="file://$MODULE_DIR$/backend/venv" />
       <excludeFolder url="file://$MODULE_DIR$/venv" />
     </content>
-<<<<<<< HEAD
-    <orderEntry type="jdk" jdkName="Python 3.14 (MESchede)" jdkType="Python SDK" />
-=======
     <orderEntry type="inheritedJdk" />
->>>>>>> origin/main
     <orderEntry type="sourceFolder" forTests="false" />
   </component>
 </module>
