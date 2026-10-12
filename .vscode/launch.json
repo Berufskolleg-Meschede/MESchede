@@ -20,6 +20,7 @@
         "PYTHONPATH": "${workspaceFolder}/backend"
       },
       "justMyCode": true
+<<<<<<< HEAD
     },
     {
       "name": "Backend (FastAPI, PLC debugging)",
@@ -39,6 +40,8 @@
         "PYTHONPATH": "${workspaceFolder}/backend"
       },
       "justMyCode": true
+=======
+>>>>>>> origin/main
     }
   ]
 }
