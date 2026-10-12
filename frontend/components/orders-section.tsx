@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import {
-  Plus, MoreHorizontal, Pencil, Trash2,
-  Clock, Activity, AlertCircle, CheckCircle2,
+  Plus, MoreHorizontal, Pencil, Trash2, Search,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import type { ProductionOrder, DeliveryOrder, Article, OrderFormData, OrderStatus } from '@/lib/types'
@@ -11,7 +10,7 @@ import { StatusBadge } from './status-badge'
 import { StatCard } from './stat-card'
 import { Button } from '@/components/ui/button'
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -45,6 +44,10 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
   const [orders, setOrders] = useState<Order[]>([])
   const [articles, setArticles] = useState<Article[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | 'all'>('all')
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingOrder, setEditingOrder] = useState<Order | null>(null)
   const [form, setForm] = useState<OrderFormData>({
@@ -56,9 +59,10 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
   const ordersApi = type === 'production' ? api.productionOrders : api.deliveryOrders
 
   useEffect(() => {
-    setLoading(true)
+    let cancelled = false
     Promise.all([ordersApi.list(), api.articles.list()]).then(
       ([ordersData, articlesData]) => {
+        if (cancelled) return
         setOrders(ordersData)
         setArticles(articlesData)
         if (articlesData.length > 0) {
@@ -66,36 +70,67 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
         }
         setLoading(false)
       }
-    )
-  }, [type])
+    ).catch(() => {
+      if (!cancelled) {
+        setError('Aufträge konnten nicht geladen werden. Bitte lade die Seite erneut.')
+        setLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [ordersApi])
 
   const openCreate = () => {
     setEditingOrder(null)
     setForm({ quantity: 1, status: 'pending', article_id: articles[0]?.id ?? 0 })
+    setError('')
     setDialogOpen(true)
   }
 
   const openEdit = (order: Order) => {
     setEditingOrder(order)
     setForm({ quantity: order.quantity, status: order.status, article_id: order.article_id })
+    setError('')
     setDialogOpen(true)
   }
 
   const handleSubmit = async () => {
-    if (editingOrder) {
-      const updated = await ordersApi.update(editingOrder.id, form)
-      setOrders(prev => prev.map(o => (o.id === editingOrder.id ? updated : o)))
-    } else {
-      const created = await ordersApi.create(form)
-      setOrders(prev => [...prev, created])
+    if (!Number.isInteger(form.quantity) || form.quantity < 1 || !articles.some(article => article.id === form.article_id)) {
+      setError('Bitte wähle einen Artikel und eine ganze Menge größer als 0.')
+      return
     }
-    setDialogOpen(false)
+    setSaving(true)
+    setError('')
+    try {
+      if (editingOrder) {
+        const updated = await ordersApi.update(editingOrder.id, form)
+        setOrders(previous => previous.map(order => order.id === editingOrder.id ? updated : order))
+      } else {
+        const created = await ordersApi.create(form)
+        setOrders(previous => [...previous, created])
+      }
+      setDialogOpen(false)
+    } catch {
+      setError('Der Auftrag konnte nicht gespeichert werden. Bitte versuche es erneut.')
+    } finally {
+      setSaving(false)
+    }
   }
 
   const handleDelete = async (id: number) => {
-    await ordersApi.delete(id)
-    setOrders(prev => prev.filter(o => o.id !== id))
+    try {
+      await ordersApi.delete(id)
+      setOrders(previous => previous.filter(order => order.id !== id))
+    } catch {
+      setError('Der Auftrag konnte nicht gelöscht werden. Bitte versuche es erneut.')
+    }
   }
+
+  const query = search.trim().toLocaleLowerCase('de-DE')
+  const visibleOrders = orders.filter(order => {
+    const name = order.article?.name ?? articles.find(article => article.id === order.article_id)?.name ?? ''
+    return (statusFilter === 'all' || order.status === statusFilter)
+      && `${name} ${order.id} ${String(order.id).padStart(4, '0')} ${order.article_id}`.toLocaleLowerCase('de-DE').includes(query)
+  })
 
   const counts = {
     pending: orders.filter(o => o.status === 'pending').length,
@@ -105,19 +140,20 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
   }
 
   return (
-    <div className="p-8 space-y-8 max-w-5xl">
+    <div className="mx-auto max-w-7xl space-y-6 p-5 md:p-8 lg:p-10">
       {/* Header */}
-      <div className="flex items-end justify-between animate-card">
+      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-border pb-5">
         <div>
-          <h1 className="font-display text-4xl font-bold tracking-tight text-foreground">
+          <h1 className="text-2xl font-semibold tracking-tight text-foreground">
             {title}
           </h1>
-          <p className="text-muted-foreground text-sm font-mono mt-1">
+          <p className="text-muted-foreground text-sm mt-1.5">
             {orders.length} Aufträge gesamt
           </p>
         </div>
         <Button
           onClick={openCreate}
+          disabled={loading || articles.length === 0}
           className="bg-primary text-primary-foreground hover:bg-primary/85 gap-1.5 font-medium"
         >
           <Plus size={15} />
@@ -126,65 +162,83 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Ausstehend"    value={counts.pending}    accent="amber"  delay={50} />
-        <StatCard label="In Bearbeitung" value={counts.in_progress} accent="blue" delay={100} />
-        <StatCard label="Fehler"         value={counts.error}       accent="red"  delay={150} />
-        <StatCard label="Abgeschlossen"  value={counts.completed}   accent="green" delay={200} />
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">
+        <StatCard label="Ausstehend"    value={counts.pending} />
+        <StatCard label="In Bearbeitung" value={counts.in_progress} />
+        <StatCard label="Fehler"         value={counts.error} />
+        <StatCard label="Abgeschlossen"  value={counts.completed} />
+      </div>
+
+      {error && !dialogOpen && <p role="alert" className="rounded-sm border border-destructive/40 p-3 text-sm text-destructive">{error}</p>}
+
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="w-full sm:max-w-sm">
+          <Label htmlFor="order-search" className="mb-2 text-xs text-muted-foreground">Aufträge suchen</Label>
+          <div className="relative">
+            <Search aria-hidden="true" size={15} className="pointer-events-none absolute left-3 top-3 text-muted-foreground" />
+            <Input id="order-search" value={search} onChange={event => setSearch(event.target.value)} placeholder="Artikel oder Auftragsnummer" className="h-10 bg-card pl-9" />
+          </div>
+        </div>
+        <div>
+          <Label htmlFor="status-filter" className="mb-2 text-xs text-muted-foreground">Status</Label>
+          <select id="status-filter" value={statusFilter} onChange={event => setStatusFilter(event.target.value as OrderStatus | 'all')} className="h-10 rounded-sm border border-input bg-card px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <option value="all">Alle Status</option>
+            {ORDER_STATUSES.map(status => <option key={status} value={status}>{STATUS_LABELS[status]}</option>)}
+          </select>
+        </div>
+        <p aria-live="polite" className="pb-2 text-xs text-muted-foreground sm:ml-auto">{loading ? 'Lade Aufträge…' : `${visibleOrders.length} von ${orders.length} Aufträgen`}</p>
       </div>
 
       {/* Table */}
       <div
-        className="bg-card border border-border rounded-lg overflow-hidden animate-card"
-        style={{ animationDelay: '250ms' }}
+        className="bg-card border border-border rounded-sm overflow-hidden"
       >
         <Table>
           <TableHeader>
-            <TableRow className="border-border hover:bg-transparent">
-              <TableHead className="text-muted-foreground text-[10px] uppercase tracking-[0.12em] font-mono w-20">
+            <TableRow className="border-border bg-secondary/35 hover:bg-secondary/35">
+              <TableHead className="text-muted-foreground text-xs font-medium w-24 px-5">
                 ID
               </TableHead>
-              <TableHead className="text-muted-foreground text-[10px] uppercase tracking-[0.12em] font-mono">
+              <TableHead className="text-muted-foreground text-xs font-medium">
                 Artikel
               </TableHead>
-              <TableHead className="text-muted-foreground text-[10px] uppercase tracking-[0.12em] font-mono w-28">
+              <TableHead className="text-muted-foreground text-xs font-medium w-28 text-right">
                 Menge
               </TableHead>
-              <TableHead className="text-muted-foreground text-[10px] uppercase tracking-[0.12em] font-mono w-40">
+              <TableHead className="text-muted-foreground text-xs font-medium w-40">
                 Status
               </TableHead>
-              <TableHead className="text-right w-16" />
+              <TableHead className="text-right w-16"><span className="sr-only">Aktionen</span></TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-14 font-mono text-sm">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-12 text-sm">
                   Lade Aufträge…
                 </TableCell>
               </TableRow>
-            ) : orders.length === 0 ? (
+            ) : visibleOrders.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-14 font-mono text-sm">
-                  Keine Aufträge vorhanden — erstelle einen neuen Auftrag.
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-12 text-sm">
+                  {orders.length === 0 ? 'Keine Aufträge vorhanden.' : 'Keine Aufträge für diese Suche gefunden.'}
                 </TableCell>
               </TableRow>
             ) : (
-              orders.map((order, i) => (
+              visibleOrders.map(order => (
                 <TableRow
                   key={order.id}
-                  className="border-border hover:bg-secondary/40 animate-row"
-                  style={{ animationDelay: `${300 + i * 35}ms` }}
+                  className="border-border hover:bg-secondary/40"
                 >
-                  <TableCell>
-                    <span className="font-mono text-[10px] text-muted-foreground bg-secondary px-1.5 py-0.5 rounded">
+                  <TableCell className="px-5 py-3.5">
+                    <span className="font-mono text-xs text-muted-foreground">
                       #{String(order.id).padStart(4, '0')}
                     </span>
                   </TableCell>
                   <TableCell className="text-foreground text-sm">
                     {order.article?.name ?? `Artikel #${order.article_id}`}
                   </TableCell>
-                  <TableCell className="font-mono text-sm text-foreground">
+                  <TableCell className="text-sm tabular-nums text-foreground text-right">
                     {order.quantity}
                     <span className="text-muted-foreground text-xs ml-1">Stk.</span>
                   </TableCell>
@@ -197,7 +251,8 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
                         <Button
                           variant="ghost"
                           size="icon"
-                          className="h-7 w-7 text-muted-foreground hover:text-foreground hover:bg-secondary"
+                          aria-label={`Aktionen für Auftrag ${order.id}`}
+                          className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-secondary"
                         >
                           <MoreHorizontal size={14} />
                         </Button>
@@ -234,21 +289,22 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="bg-popover border-border sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display text-2xl font-bold tracking-tight">
+            <DialogTitle className="text-lg font-semibold">
               {editingOrder ? 'Auftrag bearbeiten' : 'Neuer Auftrag'}
             </DialogTitle>
+            <DialogDescription>Artikel, Menge und Status des Auftrags festlegen.</DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 py-2">
+          <form id="order-form" onSubmit={event => { event.preventDefault(); void handleSubmit() }} className="space-y-5 py-2">
             <div className="space-y-1.5">
-              <Label className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground">
+              <Label htmlFor="order-article" className="text-sm text-foreground">
                 Artikel
               </Label>
               <Select
                 value={String(form.article_id)}
                 onValueChange={v => setForm(f => ({ ...f, article_id: Number(v) }))}
               >
-                <SelectTrigger className="bg-secondary border-border">
+                <SelectTrigger id="order-article" className="w-full bg-background border-input">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border">
@@ -262,27 +318,30 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground">
+              <Label htmlFor="order-quantity" className="text-sm text-foreground">
                 Menge
               </Label>
               <Input
+                id="order-quantity"
+                required
+                step={1}
                 type="number"
                 min={1}
                 value={form.quantity}
                 onChange={e => setForm(f => ({ ...f, quantity: Number(e.target.value) }))}
-                className="bg-secondary border-border font-mono"
+                className="bg-background border-input tabular-nums"
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-[10px] uppercase tracking-[0.12em] font-mono text-muted-foreground">
+              <Label htmlFor="order-status" className="text-sm text-foreground">
                 Status
               </Label>
               <Select
                 value={form.status}
                 onValueChange={v => setForm(f => ({ ...f, status: v as OrderStatus }))}
               >
-                <SelectTrigger className="bg-secondary border-border">
+                <SelectTrigger id="order-status" className="w-full bg-background border-input">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent className="bg-popover border-border">
@@ -294,7 +353,8 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
                 </SelectContent>
               </Select>
             </div>
-          </div>
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+          </form>
 
           <DialogFooter className="mt-2">
             <Button
@@ -305,10 +365,12 @@ export function OrdersSection({ type, title }: OrdersSectionProps) {
               Abbrechen
             </Button>
             <Button
-              onClick={handleSubmit}
+              type="submit"
+              form="order-form"
+              disabled={saving || articles.length === 0}
               className="bg-primary text-primary-foreground hover:bg-primary/85 font-medium"
             >
-              {editingOrder ? 'Speichern' : 'Erstellen'}
+              {saving ? 'Speichert…' : editingOrder ? 'Speichern' : 'Erstellen'}
             </Button>
           </DialogFooter>
         </DialogContent>

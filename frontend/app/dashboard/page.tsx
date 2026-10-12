@@ -1,328 +1,118 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip } from 'recharts'
+import Link from 'next/link'
+import { ArrowRight } from 'lucide-react'
 import { api } from '@/lib/api'
-import type { ProductionOrder, DeliveryOrder, Machine } from '@/lib/types'
+import type { ProductionOrder, DeliveryOrder, Machine, OrderStatus } from '@/lib/types'
 import { StatCard } from '@/components/stat-card'
 import { StatusBadge } from '@/components/status-badge'
-import { cn } from '@/lib/utils'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
-// ── Colour tokens shared between chart cells and legend ───────────────────────
-const STATUS_COLORS: Record<string, string> = {
-  pending:     'hsl(45 90% 55%)',
-  in_progress: 'hsl(190 90% 55%)',
-  error:       'hsl(0 80% 65%)',
-  completed:   'hsl(150 65% 55%)',
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  pending:     'Ausstehend',
-  in_progress: 'In Bearbeitung',
-  error:       'Fehler',
-  completed:   'Abgeschlossen',
-}
-
-// ── Custom tooltips ───────────────────────────────────────────────────────────
-
-function StatusTooltip({ active, payload }: { active?: boolean; payload?: { payload: { status: string; count: number } }[] }) {
-  if (!active || !payload?.length) return null
-  const { status, count } = payload[0].payload
-  return (
-    <div className="bg-popover border border-border rounded px-3 py-1.5 shadow-lg">
-      <span className="text-muted-foreground text-xs font-mono">
-        {STATUS_LABELS[status] ?? status}:{' '}
-      </span>
-      <span className="text-foreground text-xs font-mono font-semibold">{count}</span>
-    </div>
-  )
-}
-
-function VolumeTooltip({ active, payload }: { active?: boolean; payload?: { payload: { name: string; quantity: number } }[] }) {
-  if (!active || !payload?.length) return null
-  const { name, quantity } = payload[0].payload
-  return (
-    <div className="bg-popover border border-border rounded px-3 py-1.5 shadow-lg max-w-52">
-      <p className="text-muted-foreground text-[10px] font-mono truncate">{name}</p>
-      <p className="text-foreground text-xs font-mono font-semibold">{quantity} Stk.</p>
-    </div>
-  )
-}
-
-// ── Custom axis tick for truncated article names ──────────────────────────────
-
-function ArticleTick({ x, y, payload }: { x?: number; y?: number; payload?: { value: string } }) {
-  if (!payload) return null
-  const raw = payload.value
-  const label = raw.length > 16 ? raw.slice(0, 15) + '…' : raw
-  return (
-    <text
-      x={x}
-      y={y}
-      dy={4}
-      textAnchor="end"
-      fill="#71717a"
-      fontSize={10}
-      fontFamily="var(--font-geist-mono)"
-    >
-      {label}
-    </text>
-  )
-}
-
-function NumericTick({ x, y, payload }: { x?: number; y?: number; payload?: { value: number } }) {
-  if (!payload) return null
-  return (
-    <text
-      x={x}
-      y={y}
-      dy={-4}
-      textAnchor="middle"
-      fill="#52525b"
-      fontSize={9}
-      fontFamily="var(--font-geist-mono)"
-    >
-      {payload.value}
-    </text>
-  )
-}
-
-// ── Page ─────────────────────────────────────────────────────────────────────
+const PRIORITY: Record<OrderStatus, number> = { error: 0, in_progress: 1, pending: 2, completed: 3 }
 
 export default function DashboardPage() {
   const [productionOrders, setProductionOrders] = useState<ProductionOrder[]>([])
   const [deliveryOrders, setDeliveryOrders] = useState<DeliveryOrder[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    Promise.all([
-      api.productionOrders.list(),
-      api.deliveryOrders.list(),
-      api.machines.list(),
-    ]).then(([prod, del, mach]) => {
-      setProductionOrders(prod)
-      setDeliveryOrders(del)
-      setMachines(mach)
-    })
+    let cancelled = false
+    Promise.all([api.productionOrders.list(), api.deliveryOrders.list(), api.machines.list()])
+      .then(([production, delivery, machineData]) => {
+        if (cancelled) return
+        setProductionOrders(production)
+        setDeliveryOrders(delivery)
+        setMachines(machineData)
+      })
+      .catch(() => { if (!cancelled) setError(true) })
+      .finally(() => { if (!cancelled) setLoading(false) })
+    return () => { cancelled = true }
   }, [])
 
-  const allOrders = [...productionOrders, ...deliveryOrders]
-  const totalOrders = allOrders.length
-  const inProgress = allOrders.filter(o => o.status === 'in_progress').length
-  const completed  = allOrders.filter(o => o.status === 'completed').length
-  const onlineCount = machines.filter(m => m.status === 'online').length
-
-  // Donut data — all order statuses combined
-  const statusData = (['pending', 'in_progress', 'error', 'completed'] as const)
-    .map(status => ({ status, count: allOrders.filter(o => o.status === status).length }))
-    .filter(d => d.count > 0)
-
-  // Horizontal bar data — total units produced per article
-  const articleVolume = productionOrders.reduce<Record<string, number>>((acc, order) => {
-    const name = order.article?.name ?? `Artikel #${order.article_id}`
-    acc[name] = (acc[name] ?? 0) + order.quantity
-    return acc
+  const orders = [
+    ...productionOrders.map(order => ({ ...order, type: 'Produktion', href: '/production-orders' })),
+    ...deliveryOrders.map(order => ({ ...order, type: 'Lieferung', href: '/delivery-orders' })),
+  ]
+  const openOrders = orders.filter(order => order.status !== 'completed')
+    .sort((a, b) => PRIORITY[a.status] - PRIORITY[b.status] || a.id - b.id)
+  const online = machines.filter(machine => machine.status === 'online').length
+  const volume = productionOrders.reduce<Record<string, number>>((result, order) => {
+    const article = order.article?.name ?? `Artikel #${order.article_id}`
+    result[article] = (result[article] ?? 0) + order.quantity
+    return result
   }, {})
-
-  const volumeData = Object.entries(articleVolume)
-    .map(([name, quantity]) => ({ name, quantity }))
-    .sort((a, b) => b.quantity - a.quantity)
-
-  const barHeight = Math.max(volumeData.length * 36, 120)
+  const articles = Object.entries(volume).sort((a, b) => b[1] - a[1])
+  const maximum = Math.max(...articles.map(([, quantity]) => quantity), 1)
 
   return (
-    <div className="p-8 space-y-8 max-w-5xl">
-
-      {/* Header */}
-      <div className="animate-card">
-        <h1 className="font-display text-4xl font-bold tracking-tight text-foreground">
-          Dashboard
-        </h1>
-        <p className="text-muted-foreground text-sm font-mono mt-1">
-          Fertigungsübersicht —{' '}
-          {new Date().toLocaleDateString('de-DE', {
-            weekday: 'long', day: 'numeric', month: 'long',
-          })}
-        </p>
+    <div className="mx-auto max-w-7xl space-y-6 p-5 md:p-8 lg:p-10">
+      <header className="border-b border-border pb-5">
+        <p className="mb-2 text-xs text-muted-foreground">Fertigungssteuerung / Übersicht</p>
+        <h1 className="text-2xl font-semibold tracking-tight">Betriebsübersicht</h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">Offene Aufträge und Maschinen im Überblick.</p>
+      </header>
+      {error && <p role="alert" className="rounded-sm border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">Die Übersicht konnte nicht geladen werden. Bitte lade die Seite erneut.</p>}
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">
+        <StatCard label="Offene Aufträge" value={loading || error ? '—' : openOrders.length} />
+        <StatCard label="In Bearbeitung" value={loading || error ? '—' : orders.filter(order => order.status === 'in_progress').length} />
+        <StatCard label="Aufträge mit Fehler" value={loading || error ? '—' : orders.filter(order => order.status === 'error').length} />
+        <StatCard label="Maschinen online" value={loading || error ? '—' : `${online} / ${machines.length}`} />
       </div>
-
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard label="Fertigungsaufträge" value={productionOrders.length} accent="orange" delay={50} />
-        <StatCard label="Lieferaufträge"      value={deliveryOrders.length}   accent="blue"   delay={100} />
-        <StatCard label="In Bearbeitung"      value={inProgress}              accent="amber"  delay={150} />
-        <StatCard label="Abgeschlossen"       value={completed}               accent="green"  delay={200} />
-      </div>
-
-      {/* ── Charts ── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-
-        {/* Donut — status breakdown */}
-        <div
-          className="bg-card border border-border rounded-lg p-6 animate-card"
-          style={{ animationDelay: '250ms' }}
-        >
-          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.18em] font-mono">
-            Auftragsstatus
-          </p>
-          <p className="font-display text-xl font-bold text-foreground mt-0.5 mb-5">
-            Alle Aufträge
-          </p>
-
-          {totalOrders === 0 ? (
-            <div className="h-44 flex items-center justify-center">
-              <p className="text-muted-foreground text-xs font-mono">Keine Daten</p>
-            </div>
-          ) : (
-            <>
-              {/* Chart + centre label overlay */}
-              <div className="relative h-44">
-                <ResponsiveContainer width="100%" height="100%">
-                  <PieChart>
-                    <Pie
-                      data={statusData}
-                      dataKey="count"
-                      nameKey="status"
-                      cx="50%"
-                      cy="50%"
-                      innerRadius={52}
-                      outerRadius={76}
-                      strokeWidth={0}
-                      paddingAngle={2}
-                    >
-                      {statusData.map(entry => (
-                        <Cell
-                          key={entry.status}
-                          fill={STATUS_COLORS[entry.status] ?? '#71717a'}
-                        />
-                      ))}
-                    </Pie>
-                    <Tooltip content={<StatusTooltip />} />
-                  </PieChart>
-                </ResponsiveContainer>
-
-                {/* Centre total */}
-                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="font-display text-4xl font-bold text-foreground leading-none">
-                    {totalOrders}
-                  </span>
-                  <span className="text-muted-foreground text-[10px] font-mono uppercase tracking-widest mt-1">
-                    Gesamt
-                  </span>
-                </div>
-              </div>
-
-              {/* Legend */}
-              <div className="grid grid-cols-2 gap-x-6 gap-y-2 mt-5">
-                {statusData.map(({ status, count }) => (
-                  <div key={status} className="flex items-center gap-2">
-                    <span
-                      className="w-2 h-2 rounded-full shrink-0"
-                      style={{ background: STATUS_COLORS[status] }}
-                    />
-                    <span className="text-muted-foreground text-xs font-mono flex-1 truncate">
-                      {STATUS_LABELS[status]}
-                    </span>
-                    <span className="text-foreground text-xs font-mono tabular-nums">
-                      {count}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
+      <section className="overflow-hidden rounded-sm border border-border bg-card" aria-labelledby="open-orders-title">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 id="open-orders-title" className="text-base font-semibold">Offene Aufträge</h2>
+            <p className="mt-1 text-xs text-muted-foreground">Fehler und laufende Aufträge zuerst.</p>
+          </div>
+          <Link href="/production-orders" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring">Zur Produktion <ArrowRight size={14} aria-hidden="true" /></Link>
         </div>
-
-        {/* Horizontal bar — volume per article */}
-        <div
-          className="bg-card border border-border rounded-lg p-6 animate-card"
-          style={{ animationDelay: '300ms' }}
-        >
-          <p className="text-muted-foreground text-[10px] uppercase tracking-[0.18em] font-mono">
-            Produktionsvolumen
-          </p>
-          <p className="font-display text-xl font-bold text-foreground mt-0.5 mb-5">
-            Stück je Artikel
-          </p>
-
-          {volumeData.length === 0 ? (
-            <div className="h-44 flex items-center justify-center">
-              <p className="text-muted-foreground text-xs font-mono">Keine Daten</p>
-            </div>
-          ) : (
-            <div style={{ height: barHeight }}>
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart
-                  data={volumeData}
-                  layout="vertical"
-                  margin={{ left: 0, right: 24, top: 4, bottom: 4 }}
-                >
-                  <defs>
-                    <linearGradient id="barGrad" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%"   stopColor="hsl(35 90% 55%)" stopOpacity={1} />
-                      <stop offset="100%" stopColor="hsl(35 90% 68%)" stopOpacity={0.7} />
-                    </linearGradient>
-                  </defs>
-                  <YAxis
-                    dataKey="name"
-                    type="category"
-                    width={118}
-                    tick={<ArticleTick />}
-                    axisLine={false}
-                    tickLine={false}
-                  />
-                  <XAxis
-                    type="number"
-                    tick={<NumericTick />}
-                    axisLine={false}
-                    tickLine={false}
-                    tickCount={4}
-                  />
-                  <Tooltip content={<VolumeTooltip />} />
-                  <Bar
-                    dataKey="quantity"
-                    fill="url(#barGrad)"
-                    radius={[0, 3, 3, 0]}
-                    barSize={14}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Machines ── */}
-      <section>
-        <h2 className="text-muted-foreground text-[10px] uppercase tracking-[0.2em] font-mono mb-4">
-          Maschinen — {onlineCount}/{machines.length} Online
-        </h2>
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-          {machines.map((machine, i) => (
-            <div
-              key={machine.id}
-              className={cn(
-                'bg-card border border-border rounded-lg p-4 animate-card',
-                machine.status === 'online' && 'border-emerald-500/15'
-              )}
-              style={{ animationDelay: `${400 + i * 50}ms` }}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-muted-foreground font-mono text-[10px]">
-                  M-{String(machine.id).padStart(2, '0')}
-                </span>
+        <Table>
+          <TableHeader><TableRow className="bg-secondary/35 hover:bg-secondary/35">
+            <TableHead className="px-5 text-xs text-muted-foreground">Auftrag</TableHead>
+            <TableHead className="text-xs text-muted-foreground">Bereich</TableHead>
+            <TableHead className="text-xs text-muted-foreground">Artikel</TableHead>
+            <TableHead className="text-right text-xs text-muted-foreground">Menge</TableHead>
+            <TableHead className="px-5 text-xs text-muted-foreground">Status</TableHead>
+          </TableRow></TableHeader>
+          <TableBody>
+            {loading || error || openOrders.length === 0 ? <TableRow><TableCell colSpan={5} className="px-5 py-10 text-sm text-muted-foreground">{loading ? 'Lade Aufträge…' : error ? 'Keine Daten verfügbar.' : 'Keine offenen Aufträge.'}</TableCell></TableRow>
+              : openOrders.map(order => <TableRow key={`${order.type}-${order.id}`}>
+                <TableCell className="px-5 py-3"><Link href={order.href} className="font-mono text-xs underline decoration-border underline-offset-4 hover:decoration-foreground">#{String(order.id).padStart(4, '0')}</Link></TableCell>
+                <TableCell className="text-muted-foreground">{order.type}</TableCell>
+                <TableCell>{order.article?.name ?? `Artikel #${order.article_id}`}</TableCell>
+                <TableCell className="text-right tabular-nums">{order.quantity} <span className="text-xs text-muted-foreground">Stk.</span></TableCell>
+                <TableCell className="px-5"><StatusBadge status={order.status} /></TableCell>
+              </TableRow>)}
+          </TableBody>
+        </Table>
+      </section>
+      <div className="grid gap-6 xl:grid-cols-[3fr_2fr]">
+        <section className="rounded-sm border border-border bg-card" aria-labelledby="machines-title">
+          <div className="flex items-center justify-between border-b border-border px-5 py-4">
+            <h2 id="machines-title" className="text-base font-semibold">Maschinen</h2>
+            <span className="text-xs text-muted-foreground">{loading || error ? '—' : `${online} von ${machines.length} online`}</span>
+          </div>
+          <div className="divide-y divide-border px-5">
+            {loading || error ? <p className="py-6 text-sm text-muted-foreground">{loading ? 'Lade Maschinen…' : 'Keine Daten verfügbar.'}</p> : machines.length === 0 ? <p className="py-6 text-sm text-muted-foreground">Keine Maschinen vorhanden.</p> : machines.map(machine => (
+              <div key={machine.id} className="flex items-center justify-between gap-4 py-3.5">
+                <div><p className="text-sm">{machine.name}</p><p className="mt-1 text-xs text-muted-foreground"><span className="font-mono">M-{String(machine.id).padStart(2, '0')}</span> · {machine.type}</p></div>
                 <StatusBadge status={machine.status} />
               </div>
-              <p className="text-foreground text-sm font-medium leading-tight">
-                {machine.name}
-              </p>
-              <p className="text-muted-foreground text-xs font-mono mt-0.5">
-                {machine.type}
-              </p>
-            </div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        </section>
+        <section className="rounded-sm border border-border bg-card" aria-labelledby="volume-title">
+          <div className="border-b border-border px-5 py-4"><h2 id="volume-title" className="text-base font-semibold">Geplante Stückzahlen</h2><p className="mt-1 text-xs text-muted-foreground">Summe aller Fertigungsaufträge je Artikel</p></div>
+          <div className="space-y-5 p-5">
+            {loading || error ? <p className="text-sm text-muted-foreground">{loading ? 'Lade Stückzahlen…' : 'Keine Daten verfügbar.'}</p> : articles.length === 0 ? <p className="text-sm text-muted-foreground">Keine Fertigungsaufträge vorhanden.</p> : articles.map(([article, quantity]) => (
+              <div key={article}><div className="mb-2 flex items-start justify-between gap-4 text-sm"><span>{article}</span><span className="shrink-0 tabular-nums text-muted-foreground">{quantity} Stk.</span></div><div aria-hidden="true" className="h-1 bg-secondary"><div className="h-1 bg-[#98aaa0]" style={{ width: `${quantity / maximum * 100}%` }} /></div></div>
+            ))}
+          </div>
+        </section>
+      </div>
     </div>
   )
 }

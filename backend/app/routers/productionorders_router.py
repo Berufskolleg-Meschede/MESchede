@@ -1,15 +1,27 @@
-from fastapi import APIRouter, status
+from fastapi import APIRouter, HTTPException, status
 
-from ..workers.production_queue import ProductionOrderPayload, order_queue
+from ..workers import production_queue
+from ..workers.production_queue import ProductionOrderPayload
 
 router = APIRouter(prefix="/productionorder", tags=["productionorder"])
 
 
+@router.get("/queue-status")
+async def get_production_queue_status():
+    return production_queue.get_worker_status()
+
+
 @router.post("/", status_code=status.HTTP_202_ACCEPTED)
 async def post_productionorder(payload: ProductionOrderPayload):
-    await order_queue.put(payload)
+    if not production_queue.get_worker_status()["worker_running"]:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Production worker is not running; check /productionorder/queue-status and restart the backend.",
+        )
+    await production_queue.order_queue.put(payload)
+    production_queue.logger.info("Production order %s: accepted into queue", payload.order_id)
     return {
         "queued": True,
         "order_id": payload.order_id,
-        "queue_size": order_queue.qsize(),
+        "queue_size": production_queue.order_queue.qsize(),
     }

@@ -6,55 +6,33 @@ import { LayoutDashboard, Factory, Truck } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
-  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/production-orders', label: 'Produktion', icon: Factory },
-  { href: '/delivery-orders', label: 'Lieferung', icon: Truck },
+  { href: '/dashboard', label: 'Übersicht', icon: LayoutDashboard },
+  { href: '/production-orders', label: 'Fertigungsaufträge', icon: Factory },
+  { href: '/delivery-orders', label: 'Lieferaufträge', icon: Truck },
 ]
 
 export function Sidebar() {
   const pathname = usePathname()
   return (
-    <aside className="w-56 flex flex-col shrink-0 bg-sidebar border-r border-sidebar-border">
-      {/* Logo */}
-      <div className="px-5 py-5 border-b border-sidebar-border">
-        <p className="font-display text-2xl font-bold tracking-tight text-foreground leading-none">
-          MES<span className="text-primary">chede</span>
-        </p>
-        <p className="text-muted-foreground text-[10px] uppercase tracking-[0.2em] mt-1.5 font-mono">
-          Fertigungssteuerung
-        </p>
+    <aside className="flex shrink-0 flex-col border-b border-sidebar-border bg-sidebar md:w-60 md:border-r md:border-b-0">
+      <div className="px-5 py-6 md:py-7">
+        <p className="text-lg font-semibold tracking-tight">MESchede<span className="ml-2 text-xs font-normal text-muted-foreground">MES</span></p>
+        <p className="mt-1 text-xs text-muted-foreground">Berufskolleg Meschede</p>
       </div>
-
-      {/* Navigation */}
-      <nav className="flex-1 px-3 py-4 space-y-0.5">
+      <nav aria-label="Hauptnavigation" className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-1 md:flex-col md:justify-start">
         {NAV.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href)
           return (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                'relative flex items-center gap-3 px-3 py-2.5 rounded-md text-sm transition-all duration-150',
-                active
-                  ? 'text-primary bg-primary/8 font-medium'
-                  : 'text-muted-foreground hover:text-foreground hover:bg-secondary/60'
-              )}
-            >
-              {active && (
-                <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-5 bg-primary rounded-r-full" />
-              )}
-              <Icon size={16} strokeWidth={active ? 2 : 1.5} />
-              {label}
+            <Link key={href} href={href} aria-current={active ? 'page' : undefined}
+              className={cn('flex shrink-0 items-center gap-3 rounded-sm px-3 py-2.5 text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring',
+                active ? 'bg-sidebar-accent font-medium text-foreground' : 'text-muted-foreground hover:bg-sidebar-accent/50 hover:text-foreground')}>
+              <Icon size={16} strokeWidth={1.5} aria-hidden="true" />{label}
             </Link>
           )
         })}
       </nav>
-
-      {/* Footer */}
-      <div className="px-5 py-4 border-t border-sidebar-border">
-        <p className="text-muted-foreground text-[10px] uppercase tracking-[0.15em] font-mono">
-          BK Meschede
-        </p>
+      <div className="hidden border-t border-sidebar-border px-5 py-4 text-xs text-muted-foreground md:block">
+        Fertigungssteuerung
       </div>
     </aside>
   )

@@ -1,29 +1,23 @@
-import { Geist, Geist_Mono, Inter } from "next/font/google"
+import type { Metadata } from 'next'
+import './globals.css'
+import { Sidebar } from '@/components/sidebar'
 
-import "./globals.css"
-import { ThemeProvider } from "@/components/theme-provider"
-import { cn } from "@/lib/utils";
+export const metadata: Metadata = {
+  title: 'MESchede MES',
+  description: 'Manufacturing Execution System — Berufskolleg Meschede',
+}
 
-const inter = Inter({subsets:['latin'],variable:'--font-sans'})
-
-const fontMono = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-})
-
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html
-      lang="en"
-      suppressHydrationWarning
-      className={cn("antialiased", fontMono.variable, "font-sans", inter.variable)}
+      lang="de"
+      className="dark"
     >
-      <body>
-        <ThemeProvider>{children}</ThemeProvider>
+      <body className="antialiased">
+        <div className="flex min-h-screen flex-col bg-background md:h-screen md:flex-row">
+          <Sidebar />
+          <main className="min-w-0 flex-1 md:overflow-auto">{children}</main>
+        </div>
       </body>
     </html>
   )
