@@ -1,15 +1,13 @@
-import os
-
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio.session import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio.session import async_sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+from app.db.url import get_postgres_url
 
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+
+engine = create_async_engine(get_postgres_url("asyncpg"), echo=True, future=True)
 
 async def init_db():
     async with engine.begin() as conn:

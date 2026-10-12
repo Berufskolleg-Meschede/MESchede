@@ -1,0 +1,228 @@
+import asyncio
+import logging
+from collections import deque
+from datetime import date, time as dt_time, datetime
+from typing import Any
+
+from opcua import Client, ua
+from opcua.ua.ua_binary import variant_to_binary
+from .base import ProductionClient
+from ..models.mes_auftrag import MESAuftrag
+
+logger = logging.getLogger(__name__)
+
+
+class OpcUaClient(ProductionClient):
+    _FIELD_NAME_MAP = {"Prioritaet": "Priorität"}
+    # The current PLC uses one 's' in Kommisionieren (confirmed in IMG_7165).
+    _CHILD_NAME_ALIASES = {
+        "MESAuftragKommissionieren": ("MESAuftragKommisionieren",),
+    }
+
+    def __init__(self, url: str) -> None:
+        self.client = Client(url)
+
+    async def connect(self):
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, self.client.connect)
+            print("Connected to OPC UA server")
+        except Exception as e:
+            print(f"Error connecting to OPC UA server: {e}")
+            return False
+
+    async def disconnect(self):
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, self.client.disconnect)
+            print("Disconnected from OPC UA server")
+        except Exception as e:
+            print(f"Error disconnecting from OPC UA server: {e}")
+            return False
+
+    async def browse_nodes(self, node=None):
+        if node is None:
+            node = self.client.get_root_node()
+        print(f"Node: {node.get_display_name().Text} | NodeId: {node.nodeid}")
+        try:
+            children = node.get_children()
+            for child in children:
+                print(child.get_display_name().Text)
+                await self.browse_nodes(child)
+        except Exception:
+            pass  # Node might not have children
+
+    async def find_node_by_name(
+        self,
+        name: str,
+        namespace_index: int | None = None,
+        node=None,
+    ):
+        loop = asyncio.get_running_loop()
+        root = node if node is not None else self.client.get_objects_node()
+        logger.info("Looking for OPC UA node %s", name)
+        return await loop.run_in_executor(None, self._find_node_by_name_sync, root, name, namespace_index)
+
+    def _find_node_by_name_sync(self, node, name: str, namespace_index: int | None):
+        browse_name = node.get_browse_name()
+        if (
+            (namespace_index is None or browse_name.NamespaceIndex == namespace_index)
+            and (browse_name.Name == name or (
+                namespace_index is None and node.get_display_name().Text == name
+            ))
+        ):
+            return node
+
+        # The OPC UA address space is a graph. Breadth-first browsing avoids
+        # descending through a large unrelated branch before reaching PLC DBs;
+        # visited IDs prevent cycles and duplicate traversal of shared nodes.
+        pending = deque([node])
+        visited = {node.nodeid.to_string()}
+        while pending:
+            current = pending.popleft()
+            # Browse responses already contain names, avoiding two additional
+            # Read requests for every node merely to discover its name.
+            for reference in current.get_children_descriptions():
+                browse_name = reference.BrowseName
+                if (
+                    (namespace_index is None or browse_name.NamespaceIndex == namespace_index)
+                    and (browse_name.Name == name or (
+                        namespace_index is None and reference.DisplayName.Text == name
+                    ))
+                ):
+                    found = self.client.get_node(reference.NodeId)
+                    logger.info("Found OPC UA node %s: %s", name, reference.NodeId)
+                    return found
+                node_id = reference.NodeId.to_string()
+                if node_id not in visited:
+                    visited.add(node_id)
+                    pending.append(self.client.get_node(reference.NodeId))
+
+        logger.warning("OPC UA node %s not found after browsing %s nodes", name, len(visited))
+        return None
+
+    async def find_db_mes_schnittstelle(self, namespace_index: int | None = None):
+        return await self.find_node_by_name("DB_MES_Schnittstelle", namespace_index)
+
+    def _get_child(self, node, browse_name: str):
+        children = [(child, child.get_browse_name().Name) for child in node.get_children()]
+        candidates = (browse_name, *self._CHILD_NAME_ALIASES.get(browse_name, ()))
+        for candidate in candidates:
+            for child, actual_name in children:
+                if actual_name == candidate:
+                    if candidate != browse_name:
+                        logger.info(
+                            "OPC UA child %s resolved using PLC spelling %s", browse_name, candidate
+                        )
+                    return child
+        available = ", ".join(repr(name) for _, name in children) or "(none)"
+        raise KeyError(
+            f"OPC UA child node not found: {browse_name!r} under {node.nodeid}. "
+            f"Available children: {available}"
+        )
+
+    def read_auftragssteuerung(self, root_node) -> int:
+        kopf = self._get_child(root_node, "Kopf")
+        return self._get_child(kopf, "Auftragssteuerung_MES").get_value()
+
+    def read_status_mes(self, root_node) -> int:
+        feedback = self._get_child(root_node, "Feedback")
+        # The supplied PLC photo shows StatusMES; some versions use Status_MES.
+        for child in feedback.get_children():
+            if child.get_browse_name().Name in ("StatusMES", "Status_MES"):
+                return child.get_value()
+        raise KeyError("OPC UA feedback node not found: 'StatusMES' / 'Status_MES'")
+
+    def write_auftragssteuerung(self, root_node, value: int) -> None:
+        kopf = self._get_child(root_node, "Kopf")
+        self._write_field(kopf, "Auftragssteuerung_MES", value)
+
+    def _get_product_queue_item(self, inhalt_node, index: int):
+        name = f"Produktqueue[{index}]"
+        children = inhalt_node.get_children()
+        for child in children:
+            if child.get_browse_name().Name == name:
+                return child
+        for child in children:
+            if child.get_browse_name().Name == "Produktqueue":
+                # The live Siemens server exposes array elements as "0", "1",
+                # etc.; TIA Portal displays them as "Produktqueue[0]" instead.
+                for item in child.get_children():
+                    if item.get_browse_name().Name in (str(index), name):
+                        return item
+                raise KeyError(f"OPC UA product queue slot not found: {name!r} under {child.nodeid}")
+        raise KeyError(f"OPC UA product queue slot not found: {name!r}")
+
+    @staticmethod
+    def _encode_value(value, variant_type):
+        if isinstance(value, date) and not isinstance(value, datetime):
+            if variant_type == ua.VariantType.UInt16:
+                # SIMATIC DATE: unsigned days since 1990-01-01.
+                days = (value - date(1990, 1, 1)).days
+                if not 0 <= days <= 65378:
+                    raise ValueError("SIMATIC DATE must be between 1990-01-01 and 2168-12-31")
+                return days
+            if variant_type == ua.VariantType.DateTime:
+                return datetime(value.year, value.month, value.day)
+            raise TypeError(f"Cannot encode a date as OPC UA {variant_type.name}")
+        if isinstance(value, dt_time):
+            if value.tzinfo is not None:
+                raise ValueError("PLC time of day must be a local time without a timezone offset")
+            if variant_type == ua.VariantType.UInt32:
+                # SIMATIC TIME_OF_DAY: unsigned milliseconds since midnight.
+                return ((value.hour * 60 + value.minute) * 60 + value.second) * 1000 + value.microsecond // 1000
+            if variant_type == ua.VariantType.DateTime:
+                return datetime(1970, 1, 1, value.hour, value.minute, value.second, value.microsecond)
+            raise TypeError(f"Cannot encode a time as OPC UA {variant_type.name}")
+        return value
+
+    def _prepare_field(self, parent_node, browse_name: str, value):
+        opc_name = self._FIELD_NAME_MAP.get(browse_name, browse_name)
+        node = self._get_child(parent_node, opc_name)
+        existing_vtype = node.get_data_value().Value.VariantType
+        try:
+            value = self._encode_value(value, existing_vtype)
+            variant = ua.Variant(value, existing_vtype)
+            # Validate with the actual UA binary encoder before sending anything.
+            variant_to_binary(variant)
+        except Exception as error:
+            raise ValueError(
+                f"Cannot encode PLC field {opc_name!r} as {existing_vtype.name}: {error}"
+            ) from error
+        return node, ua.DataValue(variant)
+
+    def _write_field(self, parent_node, browse_name: str, value) -> None:
+        node, data_value = self._prepare_field(parent_node, browse_name, value)
+        node.set_data_value(data_value)
+
+    def write_order(self, root_node, order: MESAuftrag, auftragsart: int) -> None:
+        kopf_node = self._get_child(root_node, "Kopf")
+        inhalt_node = self._get_child(root_node, "Inhalt")
+        # Resolve all slots before changing order data, so an oversized queue
+        # cannot leave a partially written order on the PLC.
+        item_nodes = [
+            self._get_product_queue_item(inhalt_node, i)
+            for i in range(len(order.inhalt.Produktqueue))
+        ]
+        fields = [(kopf_node, name, value) for name, value in order.kopf.model_dump().items()]
+        fields.extend([
+            (kopf_node, "AuftragsArt", auftragsart),
+            (inhalt_node, "Anzahl", len(order.inhalt.Produktqueue)),
+            (inhalt_node, "SeriennummerStart", order.inhalt.SeriennummerStart),
+        ])
+
+        for item_node, produkt in zip(item_nodes, order.inhalt.Produktqueue):
+            for field_name, value in produkt.model_dump().items():
+                fields.append((item_node, field_name, value))
+
+        fields.append((kopf_node, "Auftragssteuerung_MES", 1))
+        prepared = [self._prepare_field(parent, name, value) for parent, name, value in fields]
+        for node, data_value in prepared:
+            node.set_data_value(data_value)
+
+
+    async def call_method(self, node_id: str, method: str, args: list[Any]) -> Any:
+        pass
+
+    async def call_production_order(self, mes_production_order_node_id: str) -> None:
+        pass

@@ -20,6 +20,25 @@
         "PYTHONPATH": "${workspaceFolder}/backend"
       },
       "justMyCode": true
+    },
+    {
+      "name": "Backend (FastAPI, PLC debugging)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "app.main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000"
+      ],
+      "cwd": "${workspaceFolder}/backend",
+      "envFile": "${workspaceFolder}/backend/.env",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/backend"
+      },
+      "justMyCode": true
     }
   ]
 }

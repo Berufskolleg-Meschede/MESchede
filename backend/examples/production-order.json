@@ -1,0 +1,26 @@
+{
+  "order_id": "opc-test-001",
+  "mes_auftrag": {
+    "kopf": {
+      "Auftragsnummer": 1,
+      "Kundennummer": 1,
+      "Startdatum": "2026-10-12",
+      "Startzeit": "09:00:00",
+      "Prioritaet": 1,
+      "Parameter0": 0,
+      "Parameter1": 0
+    },
+    "inhalt": {
+      "SeriennummerStart": 1001,
+      "Produktqueue": [
+        {
+          "ProduktID": 1,
+          "Produkttext": "Test product",
+          "Seriennummer": 1001,
+          "Sequenznummer": 1,
+          "Takt": 1
+        }
+      ]
+    }
+  }
+}
