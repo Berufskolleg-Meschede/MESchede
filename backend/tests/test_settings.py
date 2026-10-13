@@ -152,12 +152,25 @@ def test_put_settings_persists_confirmed_values_and_updates_the_cache(monkeypatc
             opcua_node_production_order="Neu",
             opcua_node_delivery_order="NeuLiefer",
             polling_interval_ms=1000,
+            opcua_node_kopf="KopfNeu",
+            opcua_node_inhalt="InhaltNeu",
+            opcua_node_feedback="FeedbackNeu",
+            opcua_node_auftragssteuerung="SteuerungNeu",
+            opcua_node_status="StatusNeu",
+            opcua_node_produktqueue_pattern="SlotNeu[{index}]",
         )
         result = await settings_router.put_settings(payload, session)
 
         assert result.opcua_node_production_order == "Neu"
+        assert result.opcua_node_kopf == "KopfNeu"
+        assert result.opcua_node_inhalt == "InhaltNeu"
+        assert result.opcua_node_feedback == "FeedbackNeu"
+        assert result.opcua_node_auftragssteuerung == "SteuerungNeu"
+        assert result.opcua_node_status == "StatusNeu"
+        assert result.opcua_node_produktqueue_pattern == "SlotNeu[{index}]"
         assert session.committed is True
         assert settings_service.get_current_settings().opcua_node_production_order == "Neu"
+        assert settings_service.get_current_settings().opcua_node_kopf == "KopfNeu"
         assert plc_handshake.POLL_INTERVAL_S == 1.0
 
     asyncio.run(scenario())
