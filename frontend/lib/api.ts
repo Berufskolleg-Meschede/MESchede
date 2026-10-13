@@ -1,10 +1,13 @@
-import type {
-  Article,
-  ProductionOrder,
-  DeliveryOrder,
-  Machine,
-  AnalyticsRun,
-  OrderFormData,
+import {
+  ApiValidationError,
+  type Article,
+  type ProductionOrder,
+  type DeliveryOrder,
+  type Machine,
+  type AnalyticsRun,
+  type OrderFormData,
+  type Settings,
+  type FieldErrorDetail,
 } from './types'
 
 const USE_MOCK = true
@@ -42,6 +45,15 @@ const MOCK_MACHINES: Machine[] = [
 
 let mockIdCounter = 100
 
+let MOCK_SETTINGS: Settings = {
+  opcua_node_production_order: 'MESAuftragProduktion',
+  opcua_node_delivery_order: 'MESAuftragKommissionieren',
+  polling_interval_ms: 500,
+}
+
+const MIN_POLLING_INTERVAL_MS = 100
+const MAX_POLLING_INTERVAL_MS = 10_000
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
@@ -49,12 +61,50 @@ async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     ...options,
   })
-  if (!res.ok) throw new Error(`API error ${res.status}: ${path}`)
+  if (!res.ok) throw await buildApiError(res, path)
   return res.json()
+}
+
+async function buildApiError(res: Response, path: string): Promise<ApiValidationError> {
+  let message = `API error ${res.status}: ${path}`
+  const fieldErrors: Record<string, string> = {}
+  try {
+    const body = await res.json()
+    const detail = body?.detail
+    if (Array.isArray(detail)) {
+      for (const item of detail as FieldErrorDetail[]) {
+        const field = item.loc?.[item.loc.length - 1]
+        if (typeof field === 'string') fieldErrors[field] = item.msg
+      }
+      message = (detail as FieldErrorDetail[]).map(d => d.msg).join(' ') || message
+    } else if (typeof detail === 'string') {
+      message = detail
+    }
+  } catch {
+    // Response body wasn't JSON; keep the generic message.
+  }
+  return new ApiValidationError(message, fieldErrors)
 }
 
 function resolveArticle(article_id: number): Article | undefined {
   return MOCK_ARTICLES.find(a => a.id === article_id)
+}
+
+function validateMockSettingsOrThrow(data: Settings): void {
+  const fieldErrors: Record<string, string> = {}
+  if (!data.opcua_node_production_order.trim()) {
+    fieldErrors.opcua_node_production_order = 'Zielnode darf nicht leer sein.'
+  }
+  if (!data.opcua_node_delivery_order.trim()) {
+    fieldErrors.opcua_node_delivery_order = 'Zielnode darf nicht leer sein.'
+  }
+  if (data.polling_interval_ms < MIN_POLLING_INTERVAL_MS || data.polling_interval_ms > MAX_POLLING_INTERVAL_MS) {
+    fieldErrors.polling_interval_ms =
+      `Abfrageintervall muss zwischen ${MIN_POLLING_INTERVAL_MS} und ${MAX_POLLING_INTERVAL_MS} Millisekunden liegen.`
+  }
+  if (Object.keys(fieldErrors).length > 0) {
+    throw new ApiValidationError('Ungültige Eingabe.', fieldErrors)
+  }
 }
 
 // ── API object ────────────────────────────────────────────────────────────────
@@ -166,6 +216,24 @@ export const api = {
     list: async (): Promise<Machine[]> => {
       if (USE_MOCK) return MOCK_MACHINES
       return apiFetch('/machine/')
+    },
+  },
+
+  settings: {
+    get: async (): Promise<Settings> => {
+      if (USE_MOCK) return { ...MOCK_SETTINGS }
+      return apiFetch('/settings/')
+    },
+    update: async (data: Settings): Promise<Settings> => {
+      if (USE_MOCK) {
+        validateMockSettingsOrThrow(data)
+        MOCK_SETTINGS = { ...data }
+        return { ...MOCK_SETTINGS }
+      }
+      return apiFetch('/settings/', {
+        method: 'PUT',
+        body: JSON.stringify(data),
+      })
     },
   },
 }
