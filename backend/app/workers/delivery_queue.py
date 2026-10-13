@@ -1,165 +1,36 @@
-import asyncio
-import logging
-import os
-from typing import Optional
+"""Kompatibilitätszugang zum gemeinsamen Auftragsworker für Lieferung."""
 
-from dotenv import load_dotenv
-from pydantic import BaseModel
-
-from ..clients.opc_ua_client import OpcUaClient
-from ..models.mes_auftrag import MESAuftrag
-from .diagnostics import WorkerDiagnostics
-from .plc_handshake import (
-    wait_for_plc_ready as _wait_for_plc_ready,
-    wait_for_plc_started as _wait_for_plc_started,
-    wait_for_plc_done as _wait_for_plc_done,
-)
-
-logger = logging.getLogger(__name__)
+from app.domain.order_run import OrderType
+from app.models.order_dto import OrderPayload
+from app.workers.order_worker_host import OrderWorkerHost
 
 
-class DeliveryOrderPayload(BaseModel):
-    order_id: str
-    mes_auftrag: MESAuftrag
+DeliveryOrderPayload = OrderPayload
+_host: OrderWorkerHost | None = None
 
 
-delivery_queue: asyncio.Queue = asyncio.Queue()
-_current_delivery: Optional[DeliveryOrderPayload] = None
-_delivery_worker_task: Optional[asyncio.Task] = None
-_diagnostics = WorkerDiagnostics()
-
-
-def get_delivery_queue_size() -> int:
-    return delivery_queue.qsize()
-
-
-def get_current_delivery_order_id() -> Optional[str]:
-    return _current_delivery.order_id if _current_delivery else None
+def bind_worker(host: OrderWorkerHost) -> None:
+    """Verbindet alte Lieferzugänge mit dem einzigen gemeinsamen Worker."""
+    global _host
+    _host = host
 
 
 def get_worker_status() -> dict:
-    return _diagnostics.snapshot(_delivery_worker_task, delivery_queue, get_current_delivery_order_id())
+    """Bezieht Lieferdiagnosen aus derselben dauerhaften Queue wie die API."""
+    if _host is None:
+        return {"worker_running": False, "worker_phase": "stopped", "queue_size": 0,
+                "current_order_id": None, "last_order_id": None, "last_completed_order_id": None, "last_error": None}
+    return _host.diagnostics(OrderType.DELIVERY)
 
 
 async def start_delivery_worker() -> None:
-    global _delivery_worker_task
-    if _delivery_worker_task and not _delivery_worker_task.done():
-        return
-    _diagnostics.phase = "starting"
-    _delivery_worker_task = asyncio.create_task(_worker_loop(), name="delivery-worker")
-    _delivery_worker_task.add_done_callback(
-        lambda task: _diagnostics.task_finished(task, "Delivery", logger)
-    )
-    logger.info("Delivery worker started")
+    """Startet nur den gebundenen gemeinsamen Worker und keine zweite Startvergabe."""
+    if _host is None:
+        raise RuntimeError("Der gemeinsame Auftragsworker wurde noch nicht gebunden.")
+    await _host.start()
 
 
 async def stop_delivery_worker() -> None:
-    global _delivery_worker_task
-    if not _delivery_worker_task:
-        return
-    _delivery_worker_task.cancel()
-    try:
-        await _delivery_worker_task
-    except asyncio.CancelledError:
-        pass
-    _delivery_worker_task = None
-
-
-async def _worker_loop() -> None:
-    opc_client: Optional[OpcUaClient] = None
-    root_node = None
-    try:
-        while True:
-            if opc_client is None:
-                try:
-                    _diagnostics.phase = "connecting"
-                    opc_client = await _create_client()
-                    _diagnostics.phase = "discovering_nodes"
-                    root_node = await _get_root_node(opc_client)
-                    logger.info("Delivery worker: order node resolved: %s", root_node)
-                except Exception as error:
-                    _diagnostics.last_error = f"{type(error).__name__}: {error}"
-                    logger.exception("Failed to create OPC UA client (delivery)")
-                    if opc_client is not None:
-                        try:
-                            await opc_client.disconnect()
-                        except Exception:
-                            logger.exception("Failed to disconnect after delivery node discovery error")
-                    opc_client = None
-                    root_node = None
-                    _diagnostics.phase = "retrying_connection"
-                    await asyncio.sleep(2.0)
-                    continue
-            _diagnostics.phase = "waiting_for_order"
-            order = await delivery_queue.get()
-            global _current_delivery
-            _current_delivery = order
-            _diagnostics.last_order_id = order.order_id
-            logger.info("Delivery order %s: dequeued; checking PLC readiness", order.order_id)
-            try:
-                _diagnostics.phase = "waiting_for_plc_ready"
-                await _wait_for_plc_ready(opc_client, root_node)
-                _diagnostics.phase = "rest_buffer"
-                await asyncio.sleep(3.0)
-                logger.info(
-                    "Delivery order %s: writing %s queue items and starting PLC",
-                    order.order_id, len(order.mes_auftrag.inhalt.Produktqueue),
-                )
-                _diagnostics.phase = "writing_order"
-                await _send_order(opc_client, root_node, order)
-                _diagnostics.phase = "waiting_for_plc_started"
-                await _wait_for_plc_started(opc_client, root_node)
-                _diagnostics.phase = "waiting_for_completion_and_reset"
-                await _wait_for_plc_done(opc_client, root_node)
-                _diagnostics.last_completed_order_id = order.order_id
-                _diagnostics.last_error = None
-                logger.info("Delivery order %s completed; PLC reset confirmed", order.order_id)
-            except asyncio.CancelledError:
-                logger.info(
-                    "Delivery order %s interrupted during %s", order.order_id, _diagnostics.phase
-                )
-                raise
-            except Exception as error:
-                _diagnostics.last_error = f"{type(error).__name__}: {error}"
-                logger.exception("Delivery order %s failed", order.order_id)
-                try:
-                    await opc_client.disconnect()
-                except Exception:
-                    logger.exception("Failed to disconnect after delivery error")
-                opc_client = None
-                root_node = None
-            finally:
-                _current_delivery = None
-                delivery_queue.task_done()
-    except asyncio.CancelledError:
-        raise
-    finally:
-        if opc_client is not None:
-            try:
-                await opc_client.disconnect()
-            except Exception:
-                logger.exception("Failed to disconnect delivery worker during shutdown")
-
-
-async def _create_client() -> OpcUaClient:
-    load_dotenv()
-    opc_ua_url = os.getenv("OPC_UA_URL")
-    if not opc_ua_url:
-        raise RuntimeError("OPC_UA_URL is not set")
-    client = OpcUaClient(opc_ua_url)
-    if await client.connect() is False:
-        raise RuntimeError("Failed to connect to OPC UA server")
-    return client
-
-
-async def _get_root_node(opc_client: OpcUaClient):
-    loop = asyncio.get_running_loop()
-    db_node = await opc_client.find_db_mes_schnittstelle()
-    if db_node is None:
-        raise KeyError("OPC UA node not found: 'DB_MES_Schnittstelle'")
-    return await loop.run_in_executor(None, opc_client._get_child, db_node, "MESAuftragKommissionieren")
-
-
-async def _send_order(opc_client: OpcUaClient, root_node, order: DeliveryOrderPayload) -> None:
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, opc_client.write_order, root_node, order.mes_auftrag, 4)
+    """Beendet denselben gemeinsamen Lifecycle wie der Produktionszugang."""
+    if _host is not None:
+        await _host.stop()
