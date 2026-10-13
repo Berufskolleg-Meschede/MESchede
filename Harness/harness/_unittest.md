@@ -105,3 +105,14 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 - **Prüft:** –
 - **Hinweis:** Kein Frontend-Testframework im Projekt vorhanden. Manuell geprüft: `npm run build` sowie ein SSR-Abruf von `/settings` zeigen den Ladezustand ("Lade Einstellungen…"); `components/settings-form.tsx` unterscheidet Laden (`loading`), Speichern (`saving`, Button-Text „Speichert…") und Übernahme (`savedAt`-Banner mit Zeitstempel) über getrennte State-Variablen.
 - **Ausführung:** Noch nicht automatisiert ausgeführt.
+
+## RabbitMQ-Bestandsereignisse
+
+- **Spec:** Keine; neues Feature, erfasst in `harness/ideas/I2 Lagerbestände per RabbitMQ übernehmen.md`.
+- **Akzeptanzkriterium:** Snapshots und Änderungen werden validiert und doppelte Ereignisse verändern den Bestand nicht erneut.
+- **State:** Implemented
+- **Testdatei:** `backend/tests/test_storage_consumer.py`
+- **Test:** `test_snapshot_persists_stock_and_duplicate_is_ignored`, `test_delta_without_snapshot_does_not_assume_zero`, `test_invalid_delta_is_rejected`, `test_message_id_can_supply_missing_event_id`
+- **Prüft:** Persistenz, Idempotenz, unbekannte Basisbestände und Pflichtfelder des Vertragsentwurfs.
+- **Ausführung:** Noch nicht ausgeführt; die Sitzung enthält weder pytest noch SQLModel.
+- **Hinweis:** Die Gruppenschnittstelle ist noch unbestätigt; Tests prüfen den dokumentierten Vertragsentwurf.

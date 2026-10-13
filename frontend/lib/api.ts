@@ -7,10 +7,12 @@ import {
   type OrderFormData,
   type Settings,
   type FieldErrorDetail,
+  type StorageItem,
+  type StorageStatus,
 } from './types'
 
 const USE_MOCK = true
-const BASE_URL = 'http://localhost:8000'
+const BASE_URL = '/api'
 
 // ── Mock data ─────────────────────────────────────────────────────────────────
 
@@ -40,6 +42,13 @@ const MOCK_MACHINES: Machine[] = [
   { id: 2, name: 'Schweißroboter A', type: 'Schweißanlage', status: 'online' },
   { id: 3, name: 'Drehmaschine 2', type: 'CNC Drehmaschine', status: 'offline' },
   { id: 4, name: 'Bohrwerk B', type: 'Bohranlage', status: 'online' },
+]
+
+const MOCK_STORAGE: StorageItem[] = [
+  { id: 1, quantity: 120, article_id: 1, updated_at: null, article: MOCK_ARTICLES[0] },
+  { id: 2, quantity: 45, article_id: 2, updated_at: null, article: MOCK_ARTICLES[1] },
+  { id: 3, quantity: 0, article_id: 3, updated_at: null, article: MOCK_ARTICLES[2] },
+  { id: 4, quantity: 230, article_id: 4, updated_at: null, article: MOCK_ARTICLES[3] },
 ]
 
 let mockIdCounter = 100
@@ -220,6 +229,16 @@ export const api = {
         method: 'PUT',
         body: JSON.stringify(data),
       })
+    },
+  },
+
+  storage: {
+    list: async (): Promise<StorageItem[]> => {
+      if (USE_MOCK) return [...MOCK_STORAGE]
+      return apiFetch('/storage/')
+    },
+    status: async (): Promise<StorageStatus> => {
+      return apiFetch('/storage/status')
     },
   },
 }

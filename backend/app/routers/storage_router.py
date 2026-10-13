@@ -1,3 +1,6 @@
+import os
+from datetime import timezone
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -5,8 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.db import get_session
 from app.models.storage import (
     Storage,
-    StorageBase
+    StorageBase,
+    StorageRead,
 )
+from app.models.article import Article
+from app.workers.storage_consumer import get_storage_consumer_status
 
 router = APIRouter(
     prefix="/storage",
@@ -14,15 +20,35 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=list[Storage])
+@router.get("/status")
+async def get_storage_status():
+    status = get_storage_consumer_status()
+    status["stale_after_seconds"] = int(os.getenv("STORAGE_STALE_AFTER_SECONDS", "3600"))
+    return status
+
+
+@router.get("/", response_model=list[StorageRead])
 async def list_storage(
     session: AsyncSession = Depends(get_session)
 ):
     result = await session.exec(
-        select(Storage)
+        select(Article, Storage).outerjoin(Storage, Storage.article_id == Article.id)
     )
-
-    return result.all()
+    rows = result.all()
+    return [
+        StorageRead(
+            id=storage.id if storage else None,
+            article_id=article.id,
+            quantity=storage.quantity if storage else None,
+            updated_at=(
+                storage.updated_at.replace(tzinfo=timezone.utc)
+                if storage and storage.updated_at and storage.updated_at.tzinfo is None
+                else storage.updated_at if storage else None
+            ),
+            article=article,
+        )
+        for article, storage in rows
+    ]
 
 
 @router.get("/{item_id}", response_model=Storage)

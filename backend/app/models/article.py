@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from sqlmodel import SQLModel, Field, Relationship
 
@@ -12,4 +12,4 @@ class Article(ArticleBase, table=True):
 
     production_orders: List["ProductionOrder"] = Relationship(back_populates="article")
     delivery_orders: List["DeliveryOrder"] = Relationship(back_populates="article")
-    storage: List["Storage"] = Relationship(back_populates="article")
+    storage: Optional["Storage"] = Relationship(back_populates="article")
