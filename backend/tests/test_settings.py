@@ -13,7 +13,6 @@ from app.models.settings import (
     DEFAULT_PRODUCTION_NODE,
     MAX_POLLING_INTERVAL_MS,
     MIN_POLLING_INTERVAL_MS,
-    SETTINGS_ID,
     Settings,
     SettingsBase,
 )
@@ -24,26 +23,9 @@ from app.workers.delivery_queue import DeliveryOrderPayload
 from app.workers.production_queue import ProductionOrderPayload
 
 
-class FakeAsyncSession:
-    """Minimal stand-in for the SQLModel AsyncSession, holding one row by id."""
-
-    def __init__(self, existing: Settings | None = None):
-        self._store: dict[int, Settings] = {}
-        if existing is not None:
-            self._store[existing.id] = existing
-        self.committed = False
-
-    async def get(self, model, id):
-        return self._store.get(id)
-
-    def add(self, obj):
-        self._store[obj.id] = obj
-
-    async def commit(self):
-        self.committed = True
-
-    async def refresh(self, obj):
-        pass
+@pytest.fixture(autouse=True)
+def reset_settings_state():
+    settings_service.apply_settings(Settings())
 
 
 # ── Model validation ─────────────────────────────────────────────────────────
@@ -78,28 +60,13 @@ def test_interval_at_bounds_is_accepted(value):
     assert settings.polling_interval_ms == value
 
 
-# ── settings_service: persistence, reload, runtime effect ───────────────────
+# ── settings_service: runtime effect ─────────────────────────────────────────
 
-def test_load_settings_creates_default_row_when_missing():
-    async def scenario():
-        session = FakeAsyncSession(existing=None)
-        settings = await settings_service.load_settings(session)
-        assert settings.id == SETTINGS_ID
-        assert session.committed is True
-        assert settings_service.get_current_settings() is settings
-
-    asyncio.run(scenario())
-
-
-def test_load_settings_returns_the_persisted_row_unchanged():
-    async def scenario():
-        existing = Settings(opcua_node_production_order="Bestehend", polling_interval_ms=750)
-        session = FakeAsyncSession(existing=existing)
-        settings = await settings_service.load_settings(session)
-        assert settings is existing
-        assert session.committed is False
-
-    asyncio.run(scenario())
+def test_get_current_settings_defaults_to_hardcoded_values():
+    settings = settings_service.get_current_settings()
+    assert settings.opcua_node_production_order == DEFAULT_PRODUCTION_NODE
+    assert settings.opcua_node_delivery_order == DEFAULT_DELIVERY_NODE
+    assert settings.polling_interval_ms == DEFAULT_POLLING_INTERVAL_MS
 
 
 def test_apply_settings_updates_the_plc_handshake_poll_interval(monkeypatch):
@@ -112,10 +79,9 @@ def test_apply_settings_updates_the_plc_handshake_poll_interval(monkeypatch):
 
 def test_put_settings_persists_confirmed_values_and_updates_the_cache(monkeypatch):
     async def scenario():
-        current = Settings(
-            opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500
+        settings_service.apply_settings(
+            Settings(opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500)
         )
-        session = FakeAsyncSession(existing=current)
         monkeypatch.setattr(production_queue, "get_current_order_id", lambda: None)
         monkeypatch.setattr(delivery_queue, "get_current_delivery_order_id", lambda: None)
 
@@ -124,10 +90,9 @@ def test_put_settings_persists_confirmed_values_and_updates_the_cache(monkeypatc
             opcua_node_delivery_order="NeuLiefer",
             polling_interval_ms=1000,
         )
-        result = await settings_router.put_settings(payload, session)
+        result = await settings_router.put_settings(payload)
 
         assert result.opcua_node_production_order == "Neu"
-        assert session.committed is True
         assert settings_service.get_current_settings().opcua_node_production_order == "Neu"
         assert plc_handshake.POLL_INTERVAL_S == 1.0
 
@@ -136,10 +101,9 @@ def test_put_settings_persists_confirmed_values_and_updates_the_cache(monkeypatc
 
 def test_put_settings_rejects_production_node_change_during_an_active_production_order(monkeypatch):
     async def scenario():
-        current = Settings(
-            opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500
+        settings_service.apply_settings(
+            Settings(opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500)
         )
-        session = FakeAsyncSession(existing=current)
         monkeypatch.setattr(production_queue, "get_current_order_id", lambda: "order-1")
         monkeypatch.setattr(delivery_queue, "get_current_delivery_order_id", lambda: None)
 
@@ -148,24 +112,20 @@ def test_put_settings_rejects_production_node_change_during_an_active_production
             opcua_node_delivery_order="AltLiefer",
             polling_interval_ms=500,
         )
-
         with pytest.raises(HTTPException) as exc_info:
-            await settings_router.put_settings(payload, session)
-
+            await settings_router.put_settings(payload)
         assert exc_info.value.status_code == 409
         assert exc_info.value.detail[0]["loc"] == ["body", "opcua_node_production_order"]
-        stored = await session.get(Settings, SETTINGS_ID)
-        assert stored.opcua_node_production_order == "Alt"
+        assert settings_service.get_current_settings().opcua_node_production_order == "Alt"
 
     asyncio.run(scenario())
 
 
 def test_put_settings_rejects_delivery_node_change_during_an_active_delivery_order(monkeypatch):
     async def scenario():
-        current = Settings(
-            opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500
+        settings_service.apply_settings(
+            Settings(opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500)
         )
-        session = FakeAsyncSession(existing=current)
         monkeypatch.setattr(production_queue, "get_current_order_id", lambda: None)
         monkeypatch.setattr(delivery_queue, "get_current_delivery_order_id", lambda: "delivery-1")
 
@@ -174,24 +134,20 @@ def test_put_settings_rejects_delivery_node_change_during_an_active_delivery_ord
             opcua_node_delivery_order="NeuLiefer",
             polling_interval_ms=500,
         )
-
         with pytest.raises(HTTPException) as exc_info:
-            await settings_router.put_settings(payload, session)
-
+            await settings_router.put_settings(payload)
         assert exc_info.value.status_code == 409
         assert exc_info.value.detail[0]["loc"] == ["body", "opcua_node_delivery_order"]
-        stored = await session.get(Settings, SETTINGS_ID)
-        assert stored.opcua_node_delivery_order == "AltLiefer"
+        assert settings_service.get_current_settings().opcua_node_delivery_order == "AltLiefer"
 
     asyncio.run(scenario())
 
 
 def test_put_settings_allows_interval_change_while_an_order_is_active(monkeypatch):
     async def scenario():
-        current = Settings(
-            opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500
+        settings_service.apply_settings(
+            Settings(opcua_node_production_order="Alt", opcua_node_delivery_order="AltLiefer", polling_interval_ms=500)
         )
-        session = FakeAsyncSession(existing=current)
         monkeypatch.setattr(production_queue, "get_current_order_id", lambda: "order-1")
         monkeypatch.setattr(delivery_queue, "get_current_delivery_order_id", lambda: "delivery-1")
 
@@ -200,7 +156,7 @@ def test_put_settings_allows_interval_change_while_an_order_is_active(monkeypatc
             opcua_node_delivery_order="AltLiefer",
             polling_interval_ms=2000,
         )
-        result = await settings_router.put_settings(payload, session)
+        result = await settings_router.put_settings(payload)
 
         assert result.polling_interval_ms == 2000
 

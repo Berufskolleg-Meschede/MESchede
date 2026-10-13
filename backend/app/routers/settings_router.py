@@ -1,7 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-
-from ..db.db import get_session
+from fastapi import APIRouter, HTTPException, status
 from ..models.settings import Settings, SettingsBase
 from ..services import settings_service
 from ..workers import delivery_queue, production_queue
@@ -14,16 +11,15 @@ def _field_error(field: str, message: str) -> list[dict]:
 
 
 @router.get("/", response_model=Settings)
-async def get_settings(session: AsyncSession = Depends(get_session)):
-    return await settings_service.load_settings(session)
+async def get_settings():
+    return settings_service.get_current_settings()
 
 
 @router.put("/", response_model=Settings)
 async def put_settings(
     payload: SettingsBase,
-    session: AsyncSession = Depends(get_session),
 ):
-    current = await settings_service.load_settings(session)
+    current = settings_service.get_current_settings()
 
     if (
         payload.opcua_node_production_order != current.opcua_node_production_order
@@ -51,14 +47,12 @@ async def put_settings(
             ),
         )
 
-    current.opcua_node_production_order = payload.opcua_node_production_order
-    current.opcua_node_delivery_order = payload.opcua_node_delivery_order
-    current.polling_interval_ms = payload.polling_interval_ms
+    updated = Settings(
+        opcua_node_production_order=payload.opcua_node_production_order,
+        opcua_node_delivery_order=payload.opcua_node_delivery_order,
+        polling_interval_ms=payload.polling_interval_ms,
+    )
 
-    session.add(current)
-    await session.commit()
-    await session.refresh(current)
+    settings_service.apply_settings(updated)
 
-    settings_service.apply_settings(current)
-
-    return current
+    return settings_service.get_current_settings()
