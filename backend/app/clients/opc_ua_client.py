@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from collections import deque
 from datetime import date, time as dt_time, datetime
@@ -7,6 +6,7 @@ from typing import Any
 from opcua import Client, ua
 from opcua.ua.ua_binary import variant_to_binary
 from .base import ProductionClient
+from .execution import run_opc
 from ..models.mes_auftrag import MESAuftrag
 
 logger = logging.getLogger(__name__)
@@ -23,18 +23,16 @@ class OpcUaClient(ProductionClient):
         self.client = Client(url)
 
     async def connect(self):
-        loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.client.connect)
+            await run_opc(self.client.connect)
             print("Connected to OPC UA server")
         except Exception as e:
             print(f"Error connecting to OPC UA server: {e}")
             return False
 
     async def disconnect(self):
-        loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, self.client.disconnect)
+            await run_opc(self.client.disconnect)
             print("Disconnected from OPC UA server")
         except Exception as e:
             print(f"Error disconnecting from OPC UA server: {e}")
@@ -58,10 +56,9 @@ class OpcUaClient(ProductionClient):
         namespace_index: int | None = None,
         node=None,
     ):
-        loop = asyncio.get_running_loop()
         root = node if node is not None else self.client.get_objects_node()
         logger.info("Looking for OPC UA node %s", name)
-        return await loop.run_in_executor(None, self._find_node_by_name_sync, root, name, namespace_index)
+        return await run_opc(self._find_node_by_name_sync, root, name, namespace_index)
 
     def _find_node_by_name_sync(self, node, name: str, namespace_index: int | None):
         browse_name = node.get_browse_name()
@@ -217,8 +214,23 @@ class OpcUaClient(ProductionClient):
 
         fields.append((kopf_node, "Auftragssteuerung_MES", 1))
         prepared = [self._prepare_field(parent, name, value) for parent, name, value in fields]
-        for node, data_value in prepared:
+        for node, data_value in prepared[:-1]:
             node.set_data_value(data_value)
+
+        # Verify the requested quantity and identities before triggering any
+        # physical movement. Do not clear unused slots or PLC/HMI-owned fields.
+        actual_count = self._get_child(inhalt_node, "Anzahl").get_value()
+        if actual_count != len(item_nodes):
+            raise ValueError(f"PLC quantity readback mismatch: expected {len(item_nodes)}, got {actual_count}")
+        for index, (item_node, produkt) in enumerate(zip(item_nodes, order.inhalt.Produktqueue)):
+            for name in ("ProduktID", "Seriennummer"):
+                actual = self._get_child(item_node, name).get_value()
+                expected = getattr(produkt, name)
+                if actual != expected:
+                    raise ValueError(f"PLC queue[{index}].{name} readback mismatch: expected {expected}, got {actual}")
+        logger.info("PLC order (%s): readback verified, Anzahl=%s; sending MES start", root_node, actual_count)
+        start_node, start_value = prepared[-1]
+        start_node.set_data_value(start_value)
 
 
     async def call_method(self, node_id: str, method: str, args: list[Any]) -> Any:

@@ -7,13 +7,10 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ..clients.opc_ua_client import OpcUaClient
+from ..clients.execution import run_opc
+from .order_execution import PlcSession, execute_order
 from ..models.mes_auftrag import MESAuftrag
 from .diagnostics import WorkerDiagnostics
-from .plc_handshake import (
-    wait_for_plc_ready as _wait_for_plc_ready,
-    wait_for_plc_started as _wait_for_plc_started,
-    wait_for_plc_done as _wait_for_plc_done,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +24,23 @@ delivery_queue: asyncio.Queue = asyncio.Queue()
 _current_delivery: Optional[DeliveryOrderPayload] = None
 _delivery_worker_task: Optional[asyncio.Task] = None
 _diagnostics = WorkerDiagnostics()
+_accepted_orders: dict[str, DeliveryOrderPayload] = {}
+
+
+def get_accepted_order(order_id: str) -> Optional[DeliveryOrderPayload]:
+    return _accepted_orders.get(order_id)
+
+
+def accept_order(payload: DeliveryOrderPayload) -> bool:
+    """Enqueue once per process; never silently replay an identical order ID."""
+    existing = _accepted_orders.get(payload.order_id)
+    if existing is not None:
+        if existing != payload:
+            raise ValueError("order_id already used with a different payload")
+        return False
+    delivery_queue.put_nowait(payload)
+    _accepted_orders[payload.order_id] = payload.model_copy(deep=True)
+    return True
 
 
 def get_delivery_queue_size() -> int:
@@ -66,27 +80,18 @@ async def stop_delivery_worker() -> None:
 
 
 async def _worker_loop() -> None:
-    opc_client: Optional[OpcUaClient] = None
-    root_node = None
+    session = PlcSession(_create_client, _get_root_node)
     try:
         while True:
-            if opc_client is None:
+            if session.client is None:
                 try:
                     _diagnostics.phase = "connecting"
-                    opc_client = await _create_client()
-                    _diagnostics.phase = "discovering_nodes"
-                    root_node = await _get_root_node(opc_client)
-                    logger.info("Delivery worker: order node resolved: %s", root_node)
+                    await session.connect()
+                    logger.info("Delivery worker: order node resolved: %s", session.root)
                 except Exception as error:
                     _diagnostics.last_error = f"{type(error).__name__}: {error}"
                     logger.exception("Failed to create OPC UA client (delivery)")
-                    if opc_client is not None:
-                        try:
-                            await opc_client.disconnect()
-                        except Exception:
-                            logger.exception("Failed to disconnect after delivery node discovery error")
-                    opc_client = None
-                    root_node = None
+                    await session.close()
                     _diagnostics.phase = "retrying_connection"
                     await asyncio.sleep(2.0)
                     continue
@@ -97,20 +102,7 @@ async def _worker_loop() -> None:
             _diagnostics.last_order_id = order.order_id
             logger.info("Delivery order %s: dequeued; checking PLC readiness", order.order_id)
             try:
-                _diagnostics.phase = "waiting_for_plc_ready"
-                await _wait_for_plc_ready(opc_client, root_node)
-                _diagnostics.phase = "rest_buffer"
-                await asyncio.sleep(3.0)
-                logger.info(
-                    "Delivery order %s: writing %s queue items and starting PLC",
-                    order.order_id, len(order.mes_auftrag.inhalt.Produktqueue),
-                )
-                _diagnostics.phase = "writing_order"
-                await _send_order(opc_client, root_node, order)
-                _diagnostics.phase = "waiting_for_plc_started"
-                await _wait_for_plc_started(opc_client, root_node)
-                _diagnostics.phase = "waiting_for_completion_and_reset"
-                await _wait_for_plc_done(opc_client, root_node)
+                await execute_order(session, order, _send_order, _diagnostics, logger, "Delivery")
                 _diagnostics.last_completed_order_id = order.order_id
                 _diagnostics.last_error = None
                 logger.info("Delivery order %s completed; PLC reset confirmed", order.order_id)
@@ -122,23 +114,14 @@ async def _worker_loop() -> None:
             except Exception as error:
                 _diagnostics.last_error = f"{type(error).__name__}: {error}"
                 logger.exception("Delivery order %s failed", order.order_id)
-                try:
-                    await opc_client.disconnect()
-                except Exception:
-                    logger.exception("Failed to disconnect after delivery error")
-                opc_client = None
-                root_node = None
+                await session.close()
             finally:
                 _current_delivery = None
                 delivery_queue.task_done()
     except asyncio.CancelledError:
         raise
     finally:
-        if opc_client is not None:
-            try:
-                await opc_client.disconnect()
-            except Exception:
-                logger.exception("Failed to disconnect delivery worker during shutdown")
+        await session.close()
 
 
 async def _create_client() -> OpcUaClient:
@@ -153,13 +136,11 @@ async def _create_client() -> OpcUaClient:
 
 
 async def _get_root_node(opc_client: OpcUaClient):
-    loop = asyncio.get_running_loop()
     db_node = await opc_client.find_db_mes_schnittstelle()
     if db_node is None:
         raise KeyError("OPC UA node not found: 'DB_MES_Schnittstelle'")
-    return await loop.run_in_executor(None, opc_client._get_child, db_node, "MESAuftragKommissionieren")
+    return await run_opc(opc_client._get_child, db_node, "MESAuftragKommissionieren")
 
 
 async def _send_order(opc_client: OpcUaClient, root_node, order: DeliveryOrderPayload) -> None:
-    loop = asyncio.get_running_loop()
-    await loop.run_in_executor(None, opc_client.write_order, root_node, order.mes_auftrag, 4)
+    await run_opc(opc_client.write_order, root_node, order.mes_auftrag, 4)

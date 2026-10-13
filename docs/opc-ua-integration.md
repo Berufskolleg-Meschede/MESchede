@@ -58,7 +58,8 @@ for the MES product catalog, including product selection and validation.
 
 ## Order sequence
 
-1. Wait for MES command `0` and MES feedback `0` (30 s timeout).
+1. Wait for MES command `0` and MES feedback `0` (600 s timeout, allowing a
+   still active previous order to finish before the next queued order).
    If a previous completed order remains latched at command `1`/feedback `5`
    after a backend restart, acknowledge it by writing command `0` and wait for
    the PLC to confirm idle.
@@ -75,6 +76,42 @@ for the MES product catalog, including product selection and validation.
 Production uses `AuftragsArt=1`; delivery/commissioning uses `AuftragsArt=4`.
 Both workers use the same handshake implementation and poll every 0.5 s.
 Neither worker writes to the HMI command or any feedback field.
+
+## Delivery recovery and quantity checks
+
+Production and delivery use the same phase-aware executor. Both accept
+`Feedback.StatusMES` and `Feedback.Status_MES`: `0` idle, `1` active, `5` done.
+A lost OPC UA request is handled as a connection error, not as an asyncio
+worker shutdown. Read phases reconnect and continue observing the current
+order within the original deadline. A VS Code stop still cancels the worker.
+
+After an uncertain write response, the executor only checks feedback; it
+never automatically sends the start command again. A lost reset response is
+resolved by checking command/feedback for idle rather than awaiting another
+completion. Command `0` is only written after feedback `5`, never to force
+an active order to stop. Library keepalive alone is not a health guarantee;
+closed idle sessions are recovered when the next order performs its reads.
+
+Before the start command, the writer reads back `Inhalt.Anzahl` and each
+requested queue item's `ProduktID` and `Seriennummer`. Mismatches prevent
+starting and are logged. Unused slots, `Inhalt.ProduktID`, HMI commands, and
+feedback are not cleared or overwritten.
+
+Repeated delivery POSTs with the same `order_id` and identical normalized
+payload are acknowledged with `duplicate: true`, `queued: false` without
+adding a second job. Reusing an ID with a different payload returns `409`.
+This protection lasts only for the current backend process; it is not a
+durable ERP/exactly-once guarantee. Accepted IDs are retained even if a job
+fails: do not blindly create a new ID to retry an uncertain physical order.
+
+The team confirmed a live delivery request with one queue item and
+`Anzahl=1` still unloaded all red products and remained at feedback `1`.
+The team also reported feedback continuously cycling through `0`, `1`, `5`.
+These PLC behaviors are **not proven fixed by the backend changes**. The PLC
+commissioning logic must respect the count and requested product/serial
+number, and reliably signal completed feedback `5`. Do not perform further
+live deliveries until this discrepancy is resolved: a cycling feedback signal
+cannot safely distinguish a real completion from an unrelated transition.
 
 ## Test on the isolated IoT network
 
@@ -157,8 +194,9 @@ written but started/finished feedback was not observed; a reset timeout means
 the PLC did not confirm idle after acknowledgement.
 
 Current limitation: queues live only in the backend process. Restarting clears
-pending jobs; failed jobs are logged and removed, without an API status or
-automatic retry. Do not interpret `202` as a durable ERP acknowledgement.
+pending jobs; failed jobs are logged and removed, without a durable API order
+status or automatic re-execution. Read-phase recovery does not retry physical
+start commands. Do not interpret `202` as a durable ERP acknowledgement.
 
 ## Local regression tests
 

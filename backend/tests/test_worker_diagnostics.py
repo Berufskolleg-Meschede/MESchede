@@ -17,6 +17,11 @@ WORKERS = [
 ]
 
 
+@pytest.fixture(autouse=True)
+def reset_delivery_acceptance(monkeypatch):
+    monkeypatch.setattr(delivery_queue, "_accepted_orders", {})
+
+
 @pytest.mark.parametrize("module,queue_name,task_name,start_name,stop_name,router,prefix", WORKERS)
 def test_status_endpoint_reports_worker_stage_without_plc_access(
     monkeypatch, module, queue_name, task_name, start_name, stop_name, router, prefix
@@ -150,3 +155,27 @@ def test_stopped_worker_rejects_order_instead_of_silently_accepting(
     assert response.status_code == 503
     assert "worker is not running" in response.json()["detail"]
     assert queue.qsize() == 0
+
+
+def test_duplicate_delivery_is_not_enqueued_again_even_after_completion(monkeypatch):
+    task = MagicMock()
+    task.done.return_value = False
+    monkeypatch.setattr(delivery_queue, "_delivery_worker_task", task)
+    queue = asyncio.Queue()
+    monkeypatch.setattr(delivery_queue, "delivery_queue", queue)
+    app = FastAPI()
+    app.include_router(deliveryorders_router.router)
+    body = {"order_id": "delivery-test-201", "mes_auftrag": {
+        "kopf": {"Auftragsnummer": 201, "Startdatum": "2026-10-13", "Startzeit": "10:00:00"},
+        "inhalt": {"Produktqueue": [{"ProduktID": 1, "Seriennummer": 1002}]},
+    }}
+    with TestClient(app) as client:
+        assert client.post("/deliveryorder/", json=body).status_code == 202
+        queue.get_nowait()
+        repeated = client.post("/deliveryorder/", json=body)
+        assert repeated.status_code == 202
+        assert repeated.json()["duplicate"] is True
+        assert queue.qsize() == 0
+        body["mes_auftrag"]["inhalt"]["Produktqueue"][0]["Seriennummer"] = 1003
+        assert client.post("/deliveryorder/", json=body).status_code == 409
+        assert queue.qsize() == 0
