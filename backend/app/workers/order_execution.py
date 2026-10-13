@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from functools import partial
 
 from ..clients.execution import OpcUaConnectionError
 from . import plc_handshake
@@ -60,7 +61,9 @@ class PlcSession:
 
 
 async def execute_order(session, order, send_order, diagnostics, worker_logger, kind):
-    await session.wait(plc_handshake.wait_for_plc_ready, 600.0, diagnostics, "waiting_for_plc_ready")
+    previous_order_ack = plc_handshake.CompletedOrderAcknowledgement()
+    readiness = partial(plc_handshake.wait_for_plc_ready, acknowledgement=previous_order_ack)
+    await session.wait(readiness, 600.0, diagnostics, "waiting_for_plc_ready")
     diagnostics.phase = "rest_buffer"
     await asyncio.sleep(REST_BUFFER_S)
     diagnostics.phase = "writing_order"
@@ -74,8 +77,11 @@ async def execute_order(session, order, send_order, diagnostics, worker_logger, 
         diagnostics.last_error = str(error)
         worker_logger.warning("Order %s: write outcome uncertain; observing PLC feedback, not resending", order.order_id)
         await session.close()
-    await session.wait(plc_handshake.wait_for_plc_started, 30.0, diagnostics, "waiting_for_plc_started")
-    await session.wait(plc_handshake.wait_for_plc_finished, 600.0, diagnostics, "waiting_for_completion")
-    # Only status 5 permits acknowledgement. If a reset response is lost,
-    # readiness accepts an already applied reset instead of awaiting 5 again.
-    await session.wait(plc_handshake.wait_for_plc_ready, 30.0, diagnostics, "waiting_for_reset")
+    started_status = await session.wait(plc_handshake.wait_for_plc_started, 30.0, diagnostics, "waiting_for_plc_started")
+    if started_status != 5:
+        await session.wait(plc_handshake.wait_for_plc_finished, 600.0, diagnostics, "waiting_for_completion")
+    # Preserve the completion already observed even if feedback changes. The
+    # stateful acknowledgement clears queue, count, then command, and checks idle
+    # after that. Lost replies are checked by readback, never by awaiting 5 again.
+    acknowledgement = plc_handshake.CompletedOrderAcknowledgement()
+    await session.wait(acknowledgement, 30.0, diagnostics, "waiting_for_reset")

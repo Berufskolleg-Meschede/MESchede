@@ -17,9 +17,9 @@ name if both exist. No other node is used as a fallback.
 | `Kopf.Auftragssteuerung_MES` | Write `1` to start; write `0` after feedback says finished. |
 | `Feedback.StatusMES` | Read `0` = idle, `1` = started, `5` = finished. The client also accepts the name `Status_MES`. |
 | `Kopf.Parameter0`, `Kopf.Parameter1` | Both are request fields, defaulting to `0`. Legacy request key `Parameter` is accepted as `Parameter0`. |
-| `Inhalt.Anzahl` | Derived from the number of `Produktqueue` items, never supplied separately and never written under `Kopf`. |
+| `Inhalt.Anzahl` | Derived from the number of `Produktqueue` items, never supplied separately or written under `Kopf`. Reset to `0` after completed feedback `5`, before clearing the MES command. |
 | `Inhalt.ProduktID` | Unused; deliberately left untouched. Each queue item has its own `ProduktID`. |
-| `Inhalt.Produktqueue` | At least one item. The live server exposes numeric child names `0` through `32` inside this node. Each requested slot is resolved before writing order data. Older `Produktqueue[n]` browse names are also supported. |
+| `Inhalt.Produktqueue` | At least one item. The live server exposes numeric child names `0` through `32` inside this node. Each requested slot is resolved before writing order data. Older `Produktqueue[n]` browse names are also supported. After completion, clear and verify the five MES input fields in every exposed slot, including unused old slots. |
 | `Produktqueue[n].Produkttext` | Maximum 30 characters (`String[30]` in the photos). |
 | `Kopf.Startdatum` | Live UA type `UInt16`: encode the ISO request date as days since `1990-01-01`. |
 | `Kopf.Startzeit` | Live UA type `UInt32`: encode the request time as milliseconds since midnight. |
@@ -61,21 +61,39 @@ for the MES product catalog, including product selection and validation.
 1. Wait for MES command `0` and MES feedback `0` (600 s timeout, allowing a
    still active previous order to finish before the next queued order).
    If a previous completed order remains latched at command `1`/feedback `5`
-   after a backend restart, acknowledge it by writing command `0` and wait for
-   the PLC to confirm idle.
+   after a backend restart, acknowledge it by first clearing the product queue,
+   then clearing `Anzahl` and writing command `0`; confirm idle.
 2. After the existing 3 s rest buffer, write the header and all requested queue
    items; write the start command `1` last.
 3. Wait for feedback `1` (30 s timeout). Feedback `5` is also accepted here
    because a very short order could finish between polls.
 4. Wait for feedback `5` (600 s timeout). Feedback `0` immediately after sending
    start is **not** treated as completion.
-5. Write `Kopf.Auftragssteuerung_MES = 0` to acknowledge completion.
-6. Confirm both feedback and command return to `0` (30 s timeout), then allow
-   the next queued order to start.
+5. Immediately after observing feedback `5`, clear `ProduktID`, `Produkttext`,
+   `Seriennummer`, `Sequenznummer`, and `Takt` in every exposed product queue
+   slot (not only the current count). Numeric inputs become `0`, text becomes
+   empty. Read back these fields; do not acknowledge a failed cleanup.
+6. Write `Inhalt.Anzahl = 0`.
+7. Then write `Kopf.Auftragssteuerung_MES = 0` to acknowledge completion.
+   Do not require a second observation of feedback `5`: the already observed
+   completion authorizes this cleanup sequence.
+8. Confirm feedback, command, and `Anzahl` are all `0` (30 s timeout), then
+   allow the next queued order to start.
+
+The count-before-command reset sequence was confirmed by the teacher on
+October 13, 2026. It applies to both production and commissioning. This has
+been tested locally with simulated PLCs, not yet verified by a live reset.
 
 Production uses `AuftragsArt=1`; delivery/commissioning uses `AuftragsArt=4`.
 Both workers use the same handshake implementation and poll every 0.5 s.
 Neither worker writes to the HMI command or any feedback field.
+
+The backend queues whole API orders, not individual product entries. All
+entries in one request are sent together with one start command; the PLC is
+responsible for processing them. Cleanup happens only after feedback `5` for
+that order. Splitting multi-item delivery requests into separate one-item PLC
+handshakes is not implemented. Queue cleanup resets only the MES input fields;
+PLC-owned slot tracking, errors, and feedback remain untouched.
 
 ## Delivery recovery and quantity checks
 
@@ -87,15 +105,19 @@ order within the original deadline. A VS Code stop still cancels the worker.
 
 After an uncertain write response, the executor only checks feedback; it
 never automatically sends the start command again. A lost reset response is
-resolved by checking command/feedback for idle rather than awaiting another
-completion. Command `0` is only written after feedback `5`, never to force
-an active order to stop. Library keepalive alone is not a health guarantee;
+resolved by reading back the reset field and continuing the retained reset
+phase, rather than awaiting another completion. Already applied resets are
+not resent. Queue cleanup followed by count `0` and command `0` only runs after observed
+feedback `5`, never to force an active order to stop. Library keepalive alone is not a health guarantee;
 closed idle sessions are recovered when the next order performs its reads.
 
 Before the start command, the writer reads back `Inhalt.Anzahl` and each
 requested queue item's `ProduktID` and `Seriennummer`. Mismatches prevent
-starting and are logged. Unused slots, `Inhalt.ProduktID`, HMI commands, and
-feedback are not cleared or overwritten.
+starting and are logged. Unused slots are not overwritten during dispatch,
+but their MES input fields are cleared after confirmed completion. A partially
+completed cleanup can resume after reconnect, reading back already cleared
+fields instead of rewriting them. `Inhalt.ProduktID`, HMI commands, and
+PLC-owned feedback/tracking fields remain untouched.
 
 Repeated delivery POSTs with the same `order_id` and identical normalized
 payload are acknowledged with `duplicate: true`, `queued: false` without
@@ -137,7 +159,7 @@ Set the request's date/time and product ID to appropriate test values first.
 The example does not send `Inhalt.ProduktID` or `Anzahl`.
 
 Observe `Inhalt.Anzahl=1`, the contents of `Produktqueue[0]`, command `1`,
-feedback `1`, feedback `5`, then command `0` and feedback `0`. The VS Code
+feedback `1`, feedback `5`, then empty queue inputs, count `0`, command `0` and feedback `0`. The VS Code
 terminal logs changes to MES feedback and the reset confirmation. `202` means
 queued in memory, not successful dispatch or production completion.
 

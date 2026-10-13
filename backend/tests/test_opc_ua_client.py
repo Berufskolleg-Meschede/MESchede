@@ -329,6 +329,88 @@ def test_reset_writes_mes_command_without_changing_hmi_or_feedback():
             node.set_data_value.assert_not_called()
 
 
+def test_quantity_reset_only_changes_inhalt_anzahl():
+    client = _make_client()
+    root, kopf, inhalt, products = _make_order_tree(True, numeric_indices=True)
+    inhalt[1].get_value.return_value = 2
+    assert client.read_anzahl(root) == 2
+    client.write_anzahl(root, 0)
+    assert client.read_anzahl(root) == 0
+    assert inhalt[1].set_data_value.call_args[0][0].Value.VariantType == ua.VariantType.Byte
+    for node in kopf + [inhalt[0], inhalt[2]]:
+        node.set_data_value.assert_not_called()
+    for product in products:
+        for node in product.get_children():
+            node.set_data_value.assert_not_called()
+
+
+@pytest.mark.parametrize("nested_queue,numeric_indices", [(False, False), (True, False), (True, True)])
+def test_queue_cleanup_clears_all_slots_but_not_plc_owned_fields(nested_queue, numeric_indices):
+    client = _make_client()
+    root, kopf, inhalt, products = _make_order_tree(nested_queue, slots=3, numeric_indices=numeric_indices)
+    inhalt[1].get_value.return_value = 1  # Old entries beyond Anzahl must also be cleared.
+    plc_fields = []
+    for product in products:
+        for field in product.get_children():
+            field.get_value.return_value = "old article" if field.get_browse_name().Name == "Produkttext" else 42
+        extra = [_make_mock_node(name, value=5) for name in ("Status", "Fehlercode", "Lagerfach")]
+        product.get_children.return_value += extra
+        plc_fields += extra
+
+    client.clear_product_queue(root)
+
+    for product in products:
+        for field in product.get_children()[:5]:
+            assert field.get_value() == ("" if field.get_browse_name().Name == "Produkttext" else 0)
+            field.set_data_value.assert_called_once()
+            assert field.set_data_value.call_args[0][0].Value.VariantType == field.get_data_value().Value.VariantType
+    for field in kopf + inhalt[:3] + plc_fields:
+        field.set_data_value.assert_not_called()
+
+
+def test_queue_cleanup_retries_partial_reset_without_rewriting_cleared_fields():
+    from concurrent.futures import CancelledError
+
+    client = _make_client()
+    root, _, _, products = _make_order_tree(True, numeric_indices=True)
+    leaves = [field for product in products for field in product.get_children()]
+    for field in leaves:
+        field.get_value.return_value = "old" if field.get_browse_name().Name == "Produkttext" else 1
+    failed_field = leaves[2]
+
+    def lost_reply(data):
+        failed_field.get_value.return_value = data.Value.Value
+        raise CancelledError()
+
+    failed_field.set_data_value.side_effect = lost_reply
+    with pytest.raises(CancelledError):
+        client.clear_product_queue(root)
+    client.clear_product_queue(root)
+    for field in leaves:
+        field.set_data_value.assert_called_once()
+
+
+def test_queue_cleanup_preflights_all_slots_before_writing():
+    client = _make_client()
+    root, _, _, products = _make_order_tree(True)
+    products[-1].get_children.return_value = products[-1].get_children.return_value[:-1]
+    with pytest.raises(KeyError, match="Takt"):
+        client.clear_product_queue(root)
+    for product in products:
+        for field in product.get_children():
+            field.set_data_value.assert_not_called()
+
+
+def test_queue_cleanup_requires_successful_readback():
+    client = _make_client()
+    root, _, _, products = _make_order_tree(True)
+    field = products[0].get_children()[0]
+    field.get_value.return_value = 1
+    field.set_data_value.side_effect = None
+    with pytest.raises(ValueError, match="queue reset readback mismatch"):
+        client.clear_product_queue(root)
+
+
 def test_one_red_delivery_writes_one_item_and_does_not_clear_other_slots():
     client = _make_client()
     root, kopf, inhalt, products = _make_order_tree(True, numeric_indices=True)

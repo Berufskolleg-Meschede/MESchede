@@ -10,9 +10,21 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL_S = 0.5
 
 
+def _log_completion(root_node, phase: str) -> None:
+    logger.info(
+        "PLC completion detected (%s): StatusMES=5; phase=%s; "
+        "starting reset of Produktqueue, Anzahl and Auftragssteuerung_MES",
+        root_node, phase,
+    )
+
+
 async def wait_for_plc_ready(
-    opc_client: OpcUaClient, root_node, timeout_s: float = 600.0
+    opc_client: OpcUaClient, root_node, timeout_s: float = 600.0, acknowledgement=None
 ) -> None:
+    acknowledgement = acknowledgement or CompletedOrderAcknowledgement()
+    if acknowledgement.queue_attempted:
+        # Completion was seen before a reset request lost its response.
+        return await acknowledgement(opc_client, root_node, timeout_s)
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     previous_state = None
@@ -32,8 +44,11 @@ async def wait_for_plc_ready(
         if status == 5 and command == 1:
             # Recover a finished order left latched across a backend restart.
             # Feedback 5 is the PLC's permission to acknowledge completion.
-            await run_opc(opc_client.write_auftragssteuerung, root_node, 0)
-            logger.info("PLC ready check (%s): acknowledging a finished order", root_node)
+            _log_completion(root_node, "ready/recovery")
+            await acknowledgement(
+                opc_client, root_node, max(0, deadline - loop.time())
+            )
+            return
         if loop.time() >= deadline:
             raise TimeoutError(
                 "PLC not ready: expected feedback StatusMES=0 and "
@@ -48,7 +63,7 @@ async def _wait_for_status(
     expected: tuple[int, ...],
     timeout_s: float,
     phase: str,
-) -> None:
+) -> int:
     loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout_s
     previous_status = None
@@ -58,7 +73,9 @@ async def _wait_for_status(
             logger.info("PLC %s (%s): StatusMES=%s", phase, root_node, status)
             previous_status = status
         if status in expected:
-            return
+            if status == 5:
+                _log_completion(root_node, phase)
+            return status
         if loop.time() >= deadline:
             raise TimeoutError(
                 f"PLC {phase} timeout: expected feedback StatusMES in {expected}, got {status}"
@@ -68,9 +85,9 @@ async def _wait_for_status(
 
 async def wait_for_plc_started(
     opc_client: OpcUaClient, root_node, timeout_s: float = 30.0
-) -> None:
+) -> int:
     # A short order may already be finished before the first poll sees status 1.
-    await _wait_for_status(opc_client, root_node, (1, 5), timeout_s, "start")
+    return await _wait_for_status(opc_client, root_node, (1, 5), timeout_s, "start")
 
 
 async def wait_for_plc_done(
@@ -82,10 +99,65 @@ async def wait_for_plc_done(
     # Status 0 immediately after a start command is not completion. Only the
     # PLC's feedback 5 authorizes acknowledging the finished order.
     await wait_for_plc_finished(opc_client, root_node, timeout_s)
-    await run_opc(opc_client.write_auftragssteuerung, root_node, 0)
-    logger.info("PLC reset (%s): Auftragssteuerung_MES=0; awaiting idle feedback", root_node)
-    await wait_for_plc_ready(opc_client, root_node, reset_timeout_s)
+    await CompletedOrderAcknowledgement()(opc_client, root_node, reset_timeout_s)
 
 
 async def wait_for_plc_finished(opc_client, root_node, timeout_s=600.0):
-    await _wait_for_status(opc_client, root_node, (5,), timeout_s, "completion")
+    return await _wait_for_status(opc_client, root_node, (5,), timeout_s, "completion")
+
+
+async def wait_for_plc_idle(opc_client, root_node, timeout_s=30.0):
+    """Only confirm reset; never require or acknowledge completion again."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + timeout_s
+    while True:
+        status = await run_opc(opc_client.read_status_mes, root_node)
+        command = await run_opc(opc_client.read_auftragssteuerung, root_node)
+        count = await run_opc(opc_client.read_anzahl, root_node)
+        if status == command == count == 0:
+            return
+        if loop.time() >= deadline:
+            raise TimeoutError(
+                f"PLC reset timeout: expected StatusMES=0, Auftragssteuerung_MES=0, Anzahl=0; "
+                f"got status={status}, command={command}, count={count}"
+            )
+        await asyncio.sleep(POLL_INTERVAL_S)
+
+
+class CompletedOrderAcknowledgement:
+    """Retain observed completion and reset progress across reconnects."""
+
+    def __init__(self):
+        self.queue_attempted = False
+        self.queue_cleared = False
+        self.count_attempted = False
+        self.count_cleared = False
+        self.command_attempted = False
+        self.command_cleared = False
+
+    async def __call__(self, opc_client, root_node, timeout_s):
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        # The caller already observed feedback 5. Do not read it again before
+        # acknowledging: a transient 5 is still the observed completion event.
+        if not self.queue_cleared:
+            self.queue_attempted = True
+            await run_opc(opc_client.clear_product_queue, root_node)
+            self.queue_cleared = True
+        if not self.count_cleared:
+            if self.count_attempted:
+                self.count_cleared = await run_opc(opc_client.read_anzahl, root_node) == 0
+            if not self.count_cleared:
+                self.count_attempted = True
+                await run_opc(opc_client.write_anzahl, root_node, 0)
+                self.count_cleared = True
+        if not self.command_cleared:
+            if self.command_attempted:
+                self.command_cleared = await run_opc(opc_client.read_auftragssteuerung, root_node) == 0
+            if not self.command_cleared:
+                self.command_attempted = True
+                await run_opc(opc_client.write_auftragssteuerung, root_node, 0)
+                self.command_cleared = True
+        logger.info("PLC reset (%s): Produktqueue cleared, Anzahl=0, Auftragssteuerung_MES=0; awaiting idle feedback", root_node)
+        await wait_for_plc_idle(
+            opc_client, root_node, max(0, deadline - asyncio.get_running_loop().time())
+        )

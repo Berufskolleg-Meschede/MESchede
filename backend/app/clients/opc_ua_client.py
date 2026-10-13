@@ -122,6 +122,14 @@ class OpcUaClient(ProductionClient):
         kopf = self._get_child(root_node, "Kopf")
         return self._get_child(kopf, "Auftragssteuerung_MES").get_value()
 
+    def read_anzahl(self, root_node) -> int:
+        inhalt = self._get_child(root_node, "Inhalt")
+        return self._get_child(inhalt, "Anzahl").get_value()
+
+    def write_anzahl(self, root_node, value: int) -> None:
+        inhalt = self._get_child(root_node, "Inhalt")
+        self._write_field(inhalt, "Anzahl", value)
+
     def read_status_mes(self, root_node) -> int:
         feedback = self._get_child(root_node, "Feedback")
         # The supplied PLC photo shows StatusMES; some versions use Status_MES.
@@ -133,6 +141,44 @@ class OpcUaClient(ProductionClient):
     def write_auftragssteuerung(self, root_node, value: int) -> None:
         kopf = self._get_child(root_node, "Kopf")
         self._write_field(kopf, "Auftragssteuerung_MES", value)
+
+    def clear_product_queue(self, root_node) -> None:
+        """Clear every exposed slot's MES input fields after confirmed completion.
+
+        Keep PLC-owned tracking/feedback fields untouched. Repeating this after
+        a lost response is safe: already cleared fields are only read back.
+        """
+        inhalt = self._get_child(root_node, "Inhalt")
+        children = inhalt.get_children()
+        queue = next((child for child in children
+                      if child.get_browse_name().Name == "Produktqueue"), None)
+        candidates = queue.get_children() if queue is not None else children
+        slots = []
+        for child in candidates:
+            name = child.get_browse_name().Name
+            if name.startswith("Produktqueue[") and name.endswith("]"):
+                index = name[len("Produktqueue["):-1]
+            elif queue is not None:
+                index = name
+            else:
+                continue
+            if index.isdecimal():
+                slots.append((int(index), child))
+        if not slots:
+            raise KeyError("OPC UA product queue has no exposed slots to clear")
+        defaults = {"ProduktID": 0, "Produkttext": "", "Seriennummer": 0,
+                    "Sequenznummer": 0, "Takt": 0}
+        # Resolve and validate every field before changing any slot.
+        prepared = [self._prepare_field(slot, name, value)
+                    for _, slot in sorted(slots, key=lambda item: item[0])
+                    for name, value in defaults.items()]
+        for node, data_value in prepared:
+            expected = data_value.Value.Value
+            if node.get_value() != expected:
+                node.set_data_value(data_value)
+            if node.get_value() != expected:
+                raise ValueError(f"PLC queue reset readback mismatch at {node.nodeid}")
+        logger.info("PLC queue reset (%s): cleared and verified %s slots", root_node, len(slots))
 
     def _get_product_queue_item(self, inhalt_node, index: int):
         name = f"Produktqueue[{index}]"
