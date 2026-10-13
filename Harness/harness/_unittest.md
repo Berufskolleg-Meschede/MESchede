@@ -40,15 +40,68 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 
 ## Testkatalog
 
-> Einträge werden bei jeder Spec-Umsetzung am Ende ergänzt. Der folgende Eintrag ist ein Platzhalter-Beispiel und wird beim ersten echten Eintrag ersetzt.
+## Settings werden persistiert und nach Neustart unverändert geladen
 
-## {Fachliches Testziel}
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Gültige Zielnodes und ein gültiges Abfrageintervall lassen sich speichern und werden nach einem Neustart des Backends unverändert angezeigt.
+- **State:** Passed
+- **Testdatei:** `backend/tests/test_settings.py`
+- **Test:** `test_load_settings_creates_default_row_when_missing`, `test_load_settings_returns_the_persisted_row_unchanged`, `test_put_settings_persists_confirmed_values_and_updates_the_cache`
+- **Prüft:** Fehlende Settings-Zeile wird mit Default-Werten angelegt; eine vorhandene Zeile wird unverändert zurückgegeben (simuliert den Neustart-Fall); eine bestätigte Änderung wird in die Session committet.
+- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
+- **Hinweis:** Zusätzlich manuell über `curl` gegen die laufende Anwendung mit echter PostgreSQL-Instanz verifiziert (GET/PUT/GET zeigt den persistierten Wert).
 
-- **Spec:** `spec/B1 {Bugfix-Name}.md`
-- **Akzeptanzkriterium:** {eindeutige, kurze Wiedergabe}
-- **State:** Planned
-- **Testdatei:** Noch nicht vorhanden
-- **Test:** Noch nicht vorhanden
-- **Prüft:** {beobachtbares Verhalten}
-- **Ausführung:** Noch nicht ausgeführt
-- **Hinweis:** Keiner
+## Backend verwendet nach einer Änderung ausschließlich die neuen Werte
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Das Backend verwendet nach einer bestätigten Änderung ausschließlich die neuen Werte für nachfolgende OPC-UA-Zugriffe.
+- **State:** Passed
+- **Testdatei:** `backend/tests/test_settings.py`
+- **Test:** `test_put_settings_persists_confirmed_values_and_updates_the_cache`, `test_apply_settings_updates_the_plc_handshake_poll_interval`, `test_production_worker_resolves_the_currently_configured_node_per_order`, `test_delivery_worker_resolves_the_currently_configured_node_per_order`
+- **Prüft:** Eine bestätigte Änderung aktualisiert den In-Memory-Cache und `plc_handshake.POLL_INTERVAL_S`; `production_queue`/`delivery_queue` lösen den Zielnode pro Auftrag anhand der aktuell im Cache stehenden Einstellung auf, nicht anhand eines beim Verbindungsaufbau zwischengespeicherten Wertes.
+- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
+- **Hinweis:** Keiner.
+
+## Ungültige Eingabe wird ohne Teiländerung abgelehnt
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Eine ungültige Eingabe (leerer Zielnode oder Intervall außerhalb von 100–10.000 ms) wird vollständig abgelehnt, ohne dass bereits gespeicherte Werte verändert werden.
+- **State:** Passed
+- **Testdatei:** `backend/tests/test_settings.py`
+- **Test:** `test_empty_or_blank_node_is_rejected`, `test_interval_outside_bounds_is_rejected`, `test_interval_at_bounds_is_accepted`
+- **Prüft:** Pydantic-Validierung lehnt leere/blanke Zielnodes sowie Intervalle außerhalb der Grenzen bereits beim Parsen des Request-Bodys ab, bevor der Endpoint-Code läuft; dadurch ist niemals eine Teiländerung an der DB-Zeile möglich.
+- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
+- **Hinweis:** Zusätzlich manuell über `curl` verifiziert: ungültiges PUT liefert 422, ein anschließendes GET zeigt die zuvor gespeicherten, unveränderten Werte.
+
+## Fehlermeldung ist dem betroffenen Feld zugeordnet
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Die Fehlermeldung einer ungültigen Eingabe ist dem betroffenen Feld zugeordnet oder als Meldung in der Oberfläche sichtbar.
+- **State:** NotApplicable
+- **Testdatei:** Keine
+- **Test:** Keiner
+- **Prüft:** –
+- **Hinweis:** Kein Frontend-Testframework im Projekt vorhanden (`frontend/package.json` enthält keine Test-Dependency). Die Zuordnung ist stattdessen manuell verifiziert: das Backend liefert `detail: [{"loc": ["body", "<feldname>"], "msg": ...}]` (siehe `curl`-Verifikation der Settings-API), und `components/settings-form.tsx` mappt `loc[-1]` über `ApiValidationError.fieldErrors` auf das jeweilige Eingabefeld.
+- **Ausführung:** Noch nicht automatisiert ausgeführt.
+
+## Zielnode-Änderung während eines aktiven Auftrags wird abgelehnt
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Eine Änderung eines Zielnodes während eines aktiven Auftrags wird zurückgestellt oder abgelehnt; der aktive Auftrag verwendet bis zu einem sicheren Zeitpunkt weiterhin den zuvor bestätigten Zielnode.
+- **State:** Passed
+- **Testdatei:** `backend/tests/test_settings.py`
+- **Test:** `test_put_settings_rejects_production_node_change_during_an_active_production_order`, `test_put_settings_rejects_delivery_node_change_during_an_active_delivery_order`, `test_put_settings_allows_interval_change_while_an_order_is_active`
+- **Prüft:** Ist `production_queue.get_current_order_id()`/`delivery_queue.get_current_delivery_order_id()` nicht `None` und ändert sich der zugehörige Zielnode, wird die gesamte Anfrage mit 409 abgelehnt und die gespeicherte Zeile bleibt unverändert; eine reine Intervalländerung bleibt trotz aktivem Auftrag möglich.
+- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
+- **Hinweis:** Diese Spec entscheidet sich für „klar zurückweisen" statt „zurückstellen und später automatisch anwenden" (siehe Entscheidungen in der Spec); Letzteres wurde nicht umgesetzt.
+
+## Lade-, Speicher- und Übernahmezustand sind in der Oberfläche erkennbar
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Ladevorgang, Speichervorgang und erfolgreiche Übernahme der Einstellungen sind in der Oberfläche jeweils eigenständig erkennbar.
+- **State:** NotApplicable
+- **Testdatei:** Keine
+- **Test:** Keiner
+- **Prüft:** –
+- **Hinweis:** Kein Frontend-Testframework im Projekt vorhanden. Manuell geprüft: `npm run build` sowie ein SSR-Abruf von `/settings` zeigen den Ladezustand ("Lade Einstellungen…"); `components/settings-form.tsx` unterscheidet Laden (`loading`), Speichern (`saving`, Button-Text „Speichert…") und Übernahme (`savedAt`-Banner mit Zeitstempel) über getrennte State-Variablen.
+- **Ausführung:** Noch nicht automatisiert ausgeführt.
