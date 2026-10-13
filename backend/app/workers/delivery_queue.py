@@ -10,6 +10,7 @@ from ..clients.opc_ua_client import OpcUaClient
 from ..clients.execution import run_opc
 from .order_execution import PlcSession, execute_order
 from ..models.mes_auftrag import MESAuftrag
+from ..services.settings_service import get_current_settings
 from .diagnostics import WorkerDiagnostics
 
 logger = logging.getLogger(__name__)

@@ -31,7 +31,7 @@ Diese Dokumente werden bei jeder Bearbeitung berücksichtigt:
 - Kommunikation, Dokumentation und Kommentare erfolgen in der Projektsprache; Code-Bezeichner bleiben US-Englisch.
 - Bestehender Anwendungscode ist bei Analyse und Dokumentation die maßgebliche Quelle für das aktuelle Verhalten.
 - IDs, Versionen, Branches, Komponenten, Reviewer, Work-Items, Zugangsdaten und Befehle dürfen nicht erfunden werden.
-- Git-Schreibaktionen (Commit, Push, Branch, Tag, Rebase) erfolgen nur nach ausdrücklichem Auftrag.
+- Git-Schreibaktionen (Commit, Push, Branch, Tag, Rebase) erfolgen nur nach ausdrücklichem Auftrag, mit Ausnahme des Commits nach Fertigstellung einer Spec (siehe „Commits“).
 
 ## Bugfixes
 
@@ -52,3 +52,10 @@ Diese Dokumente werden bei jeder Bearbeitung berücksichtigt:
 - Verstöße gegen die Coderichtlinien in bestehendem, nicht geändertem Code werden mit Regel-Nr. und Fix-Vorschlag gemeldet, aber nicht ungefragt korrigiert.
 - Zusätzliche erklärende Code-Kommentare werden nur bei Bugfixes ergänzt und dokumentieren den Grund für den Fix.
 - Sobald Code und Spec nachweislich übereinstimmen, wird der Spec-State in derselben Session auf `Implemented` gesetzt.
+
+## Commits
+
+- Ist eine Spec fertig umgesetzt (Spec-State auf `Implemented` gesetzt, Code und Spec stimmen nachweislich überein), wird direkt ein Commit erstellt, auch ohne gesonderten Auftrag für diesen einzelnen Commit.
+- Die Commit-Nachricht enthält keinen Hinweis auf eine Erstellung oder Mitwirkung durch KI (keine Erwähnung von KI/Assistent/Modellnamen, keine entsprechenden Signatur- oder Co-Authored-By-Zeilen o. Ä.).
+- Werden mehrere Specs gleichzeitig umgesetzt, erfolgt spätestens nach jeder fertiggestellten Spec ein eigener Commit; Änderungen unterschiedlicher Specs werden nicht in einem gemeinsamen Commit zusammengefasst.
+- Bei umfangreichen Änderungen innerhalb einer Spec können auch mehrere Commits vor deren Fertigstellung sinnvoll sein, um Wiederherstellbarkeit, Testbarkeit und durchgehende Funktionsfähigkeit an Zwischenständen zu sichern.

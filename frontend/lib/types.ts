@@ -36,3 +36,24 @@ export interface OrderFormData {
   status: OrderStatus
   article_id: number
 }
+
+export interface Settings {
+  opcua_node_production_order: string
+  opcua_node_delivery_order: string
+  polling_interval_ms: number
+}
+
+export interface FieldErrorDetail {
+  loc: (string | number)[]
+  msg: string
+}
+
+export class ApiValidationError extends Error {
+  fieldErrors: Record<string, string>
+
+  constructor(message: string, fieldErrors: Record<string, string> = {}) {
+    super(message)
+    this.name = 'ApiValidationError'
+    this.fieldErrors = fieldErrors
+  }
+}
