@@ -40,12 +40,12 @@ def test_library_cancellation_is_a_connection_error_not_a_task_shutdown():
 
 
 @pytest.mark.parametrize("module,queue_name", [(production_queue, "order_queue"), (delivery_queue, "delivery_queue")])
-@pytest.mark.parametrize("failure", ["idle", "started", "completion", "reset", "count_response", "write_response", "previous_active"])
+@pytest.mark.parametrize("failure", ["discovery", "idle", "started", "completion", "reset", "count_response", "write_response", "previous_active"])
 def test_workers_recover_without_replaying_start(monkeypatch, module, queue_name, failure):
     state = {"command": 1 if failure == "previous_active" else 0,
              "count": 1 if failure == "previous_active" else 0,
              "status": 1 if failure == "previous_active" else 0,
-             "failed": False, "starts": 0, "resets": 0, "connections": 0}
+             "failed": False, "starts": 0, "resets": 0, "connections": 0, "root_reads": 0}
 
     class SimulatedClient:
         async def disconnect(self):
@@ -103,7 +103,15 @@ def test_workers_recover_without_replaying_start(monkeypatch, module, queue_name
             return SimulatedClient()
 
         monkeypatch.setattr(module, "_create_client", create)
-        monkeypatch.setattr(module, "_get_root_node", AsyncMock(return_value="SIMULATED"))
+
+        async def get_root(client, node_name):
+            state["root_reads"] += 1
+            if failure == "discovery" and state["root_reads"] == 2:
+                state["failed"] = True
+                raise OpcUaConnectionError("Connection lost resolving the current order target")
+            return "SIMULATED"
+
+        monkeypatch.setattr(module, "_get_root_node", get_root)
         monkeypatch.setattr(module, "_diagnostics", WorkerDiagnostics())
         queue = asyncio.Queue()
         monkeypatch.setattr(module, queue_name, queue)

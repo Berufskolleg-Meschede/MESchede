@@ -23,6 +23,17 @@ class PlcSession:
         self.client = await self.create_client()
         self.root = await self.get_root(self.client)
 
+    async def select_order_root(self, get_root):
+        """Refresh the target per order and retain its resolver for reconnects."""
+        self.get_root = get_root
+        self.root = None
+        if self.client is not None:
+            try:
+                self.root = await get_root(self.client)
+            except OpcUaConnectionError:
+                logger.warning("PLC connection lost during order node discovery; reconnecting before readiness")
+                await self.close()
+
     async def close(self):
         client, self.client = self.client, None
         self.root = None

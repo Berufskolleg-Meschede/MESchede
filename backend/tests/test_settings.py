@@ -22,6 +22,13 @@ from app.services import settings_service
 from app.workers import delivery_queue, plc_handshake, production_queue
 from app.workers.delivery_queue import DeliveryOrderPayload
 from app.workers.production_queue import ProductionOrderPayload
+from app.workers.diagnostics import WorkerDiagnostics
+
+
+@pytest.fixture(autouse=True)
+def isolate_runtime_settings(monkeypatch):
+    monkeypatch.setattr(settings_service, "_current", None)
+    monkeypatch.setattr(plc_handshake, "POLL_INTERVAL_S", 0.5)
 
 
 class FakeAsyncSession:
@@ -209,77 +216,80 @@ def test_put_settings_allows_interval_change_while_an_order_is_active(monkeypatc
 
 # ── Workers: the configured node is resolved per order, not cached at connect ─
 
-def test_production_worker_resolves_the_currently_configured_node_per_order(monkeypatch):
+@pytest.mark.parametrize("module,queue_name,payload_type,setting_field", [
+    (production_queue, "order_queue", ProductionOrderPayload, "opcua_node_production_order"),
+    (delivery_queue, "delivery_queue", DeliveryOrderPayload, "opcua_node_delivery_order"),
+])
+@pytest.mark.parametrize("reconnect", [False, True])
+def test_workers_refresh_configured_target_per_order_and_pin_it_during_reconnect(
+    monkeypatch, module, queue_name, payload_type, setting_field, reconnect
+):
     async def scenario():
         queue: asyncio.Queue = asyncio.Queue()
-        monkeypatch.setattr(production_queue, "order_queue", queue)
-        monkeypatch.setattr(production_queue, "_create_client", AsyncMock(return_value=MagicMock()))
-        get_root = AsyncMock(return_value="root")
-        monkeypatch.setattr(production_queue, "_get_root_node", get_root)
-        monkeypatch.setattr(production_queue, "_wait_for_plc_ready", AsyncMock())
-        monkeypatch.setattr(production_queue, "_send_order", AsyncMock())
-        monkeypatch.setattr(production_queue, "_wait_for_plc_started", AsyncMock())
-        monkeypatch.setattr(production_queue, "_wait_for_plc_done", AsyncMock())
-        monkeypatch.setattr(
-            production_queue,
-            "get_current_settings",
-            lambda: Settings(opcua_node_production_order="CustomProdNode"),
-        )
+        diagnostics = WorkerDiagnostics()
+        monkeypatch.setattr(module, queue_name, queue)
+        monkeypatch.setattr(module, "_diagnostics", diagnostics)
+        client = MagicMock()
+        client.disconnect = AsyncMock()
+        monkeypatch.setattr(module, "_create_client", AsyncMock(return_value=client))
+        current = Settings(**{setting_field: "StartupNode"})
+        monkeypatch.setattr(module, "get_current_settings", lambda: current)
+        requested_nodes = []
 
-        queue.put_nowait(ProductionOrderPayload(
-            order_id="1",
-            mes_auftrag=MESAuftrag(
-                kopf=AuftragKopf(Auftragsnummer=1, Startdatum=date(2026, 10, 12), Startzeit=time(8)),
-                inhalt=AuftragInhalt(Produktqueue=[ProduktDaten(ProduktID=1)]),
-            ),
-        ))
-        task = asyncio.create_task(production_queue._worker_loop())
+        async def resolve(client, node_name):
+            requested_nodes.append(node_name)
+            return node_name
+
+        monkeypatch.setattr(module, "_get_root_node", AsyncMock(side_effect=resolve))
+        dispatched = []
+
+        async def execute(session, order, send, diagnostics, logger, kind):
+            expected_node = f"CustomNode{order.order_id}"
+            assert session.root == expected_node
+            if reconnect:
+                # Even an external cache change must not redirect an active job.
+                setattr(current, setting_field, "ChangedDuringOrder")
+                await session.close()
+                await session.connect()
+                assert session.root == expected_node
+            dispatched.append(expected_node)
+
+        monkeypatch.setattr(module, "execute_order", AsyncMock(side_effect=execute))
+        task = asyncio.create_task(module._worker_loop())
         try:
-            await asyncio.wait_for(queue.join(), timeout=15)
+            await asyncio.sleep(0)
+            assert diagnostics.phase == "waiting_for_order"
+            for number in (1, 2):
+                setattr(current, setting_field, f"CustomNode{number}")
+                queue.put_nowait(payload_type(
+                    order_id=str(number),
+                    mes_auftrag=MESAuftrag(
+                        kopf=AuftragKopf(Auftragsnummer=number, Startdatum=date(2026, 10, 12), Startzeit=time(8)),
+                        inhalt=AuftragInhalt(Produktqueue=[ProduktDaten(ProduktID=1)]),
+                    ),
+                ))
+                await asyncio.wait_for(queue.join(), timeout=3)
+                assert diagnostics.last_completed_order_id == str(number)
+                assert diagnostics.last_error is None
+            assert dispatched == ["CustomNode1", "CustomNode2"]
+            expected = ["StartupNode", "CustomNode1"]
+            if reconnect:
+                expected.append("CustomNode1")
+            expected.append("CustomNode2")
+            if reconnect:
+                expected.append("CustomNode2")
+            assert requested_nodes == expected
         finally:
             task.cancel()
             with pytest.raises(asyncio.CancelledError):
                 await task
 
-        get_root.assert_awaited_once()
-        assert get_root.call_args.args[1] == "CustomProdNode"
-
     asyncio.run(scenario())
 
 
-def test_delivery_worker_resolves_the_currently_configured_node_per_order(monkeypatch):
-    async def scenario():
-        queue: asyncio.Queue = asyncio.Queue()
-        monkeypatch.setattr(delivery_queue, "delivery_queue", queue)
-        monkeypatch.setattr(delivery_queue, "_create_client", AsyncMock(return_value=MagicMock()))
-        get_root = AsyncMock(return_value="root")
-        monkeypatch.setattr(delivery_queue, "_get_root_node", get_root)
-        monkeypatch.setattr(delivery_queue, "_wait_for_plc_ready", AsyncMock())
-        monkeypatch.setattr(delivery_queue, "_send_order", AsyncMock())
-        monkeypatch.setattr(delivery_queue, "_wait_for_plc_started", AsyncMock())
-        monkeypatch.setattr(delivery_queue, "_wait_for_plc_done", AsyncMock())
-        monkeypatch.setattr(
-            delivery_queue,
-            "get_current_settings",
-            lambda: Settings(opcua_node_delivery_order="CustomDeliveryNode"),
-        )
-
-        queue.put_nowait(DeliveryOrderPayload(
-            order_id="1",
-            mes_auftrag=MESAuftrag(
-                kopf=AuftragKopf(Auftragsnummer=1, Startdatum=date(2026, 10, 12), Startzeit=time(8)),
-                inhalt=AuftragInhalt(Produktqueue=[ProduktDaten(ProduktID=1)]),
-            ),
-        ))
-        task = asyncio.create_task(delivery_queue._worker_loop())
-        try:
-            await asyncio.wait_for(queue.join(), timeout=15)
-        finally:
-            task.cancel()
-            with pytest.raises(asyncio.CancelledError):
-                await task
-
-        get_root.assert_awaited_once()
-        assert get_root.call_args.args[1] == "CustomDeliveryNode"
-
-    asyncio.run(scenario())
+@pytest.mark.parametrize("module", [production_queue, delivery_queue])
+def test_root_resolution_uses_the_requested_browse_name(module):
+    client = MagicMock()
+    client.find_db_mes_schnittstelle = AsyncMock(return_value="db")
+    assert asyncio.run(module._get_root_node(client, "CustomNode")) == client._get_child.return_value
+    client._get_child.assert_called_once_with("db", "CustomNode")

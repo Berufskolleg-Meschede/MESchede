@@ -3,12 +3,13 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.workers import plc_handshake, production_queue, delivery_queue
+from app.workers import plc_handshake, production_queue, delivery_queue, order_execution
 
 
 @pytest.fixture(autouse=True)
 def fast_polling(monkeypatch):
     monkeypatch.setattr(plc_handshake, "POLL_INTERVAL_S", 0)
+    monkeypatch.setattr(order_execution, "REST_BUFFER_S", 0)
 
 
 def test_ready_checks_both_command_and_feedback():

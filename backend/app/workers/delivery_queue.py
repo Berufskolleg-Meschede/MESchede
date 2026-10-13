@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+from functools import partial
 from typing import Optional
 
 from dotenv import load_dotenv
@@ -81,7 +82,10 @@ async def stop_delivery_worker() -> None:
 
 
 async def _worker_loop() -> None:
-    session = PlcSession(_create_client, _get_root_node)
+    async def resolve_current_root(client):
+        return await _get_root_node(client, get_current_settings().opcua_node_delivery_order)
+
+    session = PlcSession(_create_client, resolve_current_root)
     try:
         while True:
             if session.client is None:
@@ -103,6 +107,9 @@ async def _worker_loop() -> None:
             _diagnostics.last_order_id = order.order_id
             logger.info("Delivery order %s: dequeued; checking PLC readiness", order.order_id)
             try:
+                node_name = get_current_settings().opcua_node_delivery_order
+                _diagnostics.phase = "discovering_nodes"
+                await session.select_order_root(partial(_get_root_node, node_name=node_name))
                 await execute_order(session, order, _send_order, _diagnostics, logger, "Delivery")
                 _diagnostics.last_completed_order_id = order.order_id
                 _diagnostics.last_error = None
@@ -117,6 +124,7 @@ async def _worker_loop() -> None:
                 logger.exception("Delivery order %s failed", order.order_id)
                 await session.close()
             finally:
+                session.get_root = resolve_current_root
                 _current_delivery = None
                 delivery_queue.task_done()
     except asyncio.CancelledError:
@@ -136,11 +144,11 @@ async def _create_client() -> OpcUaClient:
     return client
 
 
-async def _get_root_node(opc_client: OpcUaClient):
+async def _get_root_node(opc_client: OpcUaClient, node_name: str):
     db_node = await opc_client.find_db_mes_schnittstelle()
     if db_node is None:
         raise KeyError("OPC UA node not found: 'DB_MES_Schnittstelle'")
-    return await run_opc(opc_client._get_child, db_node, "MESAuftragKommissionieren")
+    return await run_opc(opc_client._get_child, db_node, node_name)
 
 
 async def _send_order(opc_client: OpcUaClient, root_node, order: DeliveryOrderPayload) -> None:

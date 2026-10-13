@@ -95,6 +95,14 @@ that order. Splitting multi-item delivery requests into separate one-item PLC
 handshakes is not implemented. Queue cleanup resets only the MES input fields;
 PLC-owned slot tracking, errors, and feedback remain untouched.
 
+The order target browse names come from the persisted settings
+(`opcua_node_production_order` and `opcua_node_delivery_order`). Each worker
+resolves the current configured target before processing a new order, even
+when it reuses an existing connection. That target is captured for the entire
+order, including reconnects and completion/reset; settings changes must not
+redirect an active order. After finishing or failing, the next order uses the
+current settings. The existing PLC spelling alias remains supported.
+
 ## Delivery recovery and quantity checks
 
 Production and delivery use the same phase-aware executor. Both accept
