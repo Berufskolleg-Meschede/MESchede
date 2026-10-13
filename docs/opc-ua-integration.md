@@ -41,6 +41,21 @@ Other visible additions are product fields `Station`, `Position`,
 `Feedback`, and `Handshake` sections. The MES does not write these additional
 fields: the confirmed protocol only needs the MES command and MES feedback.
 
+## Product catalog: single source of truth
+
+On October 13, 2026, the team reported that `DB_MES_Schnittstelle` also
+contains a `Produktspezifikationen` array with all product information.
+Use `DB_MES_Schnittstelle.Produktspezifikationen` as the authoritative source
+for the MES product catalog, including product selection and validation.
+
+- Array index `0` is empty and must be skipped when reading the catalog.
+  Product entries start at index `1`.
+- This applies to the product specifications array; the order's
+  `Produktqueue` still starts at index `0` as documented above.
+- The catalog reader is not implemented yet. Before implementing it, inspect
+  the actual OPC UA browse names, fields, array bounds, and product identifiers;
+  do not assume that an array index equals a `ProduktID`.
+
 ## Order sequence
 
 1. Wait for MES command `0` and MES feedback `0` (30 s timeout).
