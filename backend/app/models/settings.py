@@ -1,6 +1,8 @@
 from pydantic import field_validator
 from sqlmodel import Field, SQLModel
 
+SETTINGS_ID = 1
+
 MIN_POLLING_INTERVAL_MS = 100
 MAX_POLLING_INTERVAL_MS = 10_000
 
@@ -33,5 +35,5 @@ class SettingsBase(SQLModel):
         return value
 
 
-class Settings(SettingsBase):
-    pass
+class Settings(SettingsBase, table=True):
+    id: int = Field(default=SETTINGS_ID, primary_key=True, nullable=False)
