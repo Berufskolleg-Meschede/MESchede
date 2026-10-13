@@ -121,30 +121,33 @@ class OpcUaClient(ProductionClient):
             f"Available children: {available}"
         )
 
-    def read_auftragssteuerung(self, root_node) -> int:
-        kopf = self._get_child(root_node, "Kopf")
-        return self._get_child(kopf, "Auftragssteuerung_MES").get_value()
+    def read_auftragssteuerung(
+        self, root_node, kopf_node: str = "Kopf", auftragssteuerung_node: str = "Auftragssteuerung_MES"
+    ) -> int:
+        kopf = self._get_child(root_node, kopf_node)
+        return self._get_child(kopf, auftragssteuerung_node).get_value()
 
-    def read_status_mes(self, root_node) -> int:
-        feedback = self._get_child(root_node, "Feedback")
-        # The supplied PLC photo shows StatusMES; some versions use Status_MES.
-        for child in feedback.get_children():
-            if child.get_browse_name().Name in ("StatusMES", "Status_MES"):
-                return child.get_value()
-        raise KeyError("OPC UA feedback node not found: 'StatusMES' / 'Status_MES'")
+    def read_status_mes(
+        self, root_node, feedback_node: str = "Feedback", status_node: str = "StatusMES"
+    ) -> int:
+        feedback = self._get_child(root_node, feedback_node)
+        return self._get_child(feedback, status_node).get_value()
 
-    def write_auftragssteuerung(self, root_node, value: int) -> None:
-        kopf = self._get_child(root_node, "Kopf")
-        self._write_field(kopf, "Auftragssteuerung_MES", value)
+    def write_auftragssteuerung(
+        self, root_node, value: int, kopf_node: str = "Kopf", auftragssteuerung_node: str = "Auftragssteuerung_MES"
+    ) -> None:
+        kopf = self._get_child(root_node, kopf_node)
+        self._write_field(kopf, auftragssteuerung_node, value)
 
-    def _get_product_queue_item(self, inhalt_node, index: int):
-        name = f"Produktqueue[{index}]"
+    def _get_product_queue_item(self, inhalt_node, index: int, pattern: str = "Produktqueue[{index}]"):
+        name = pattern.format(index=index)
+        container_name = pattern.split("[", 1)[0]
         children = inhalt_node.get_children()
         for child in children:
             if child.get_browse_name().Name == name:
                 return child
         for child in children:
-            if child.get_browse_name().Name == "Produktqueue":
+            if child.get_browse_name().Name == container_name:
                 # The live Siemens server exposes array elements as "0", "1",
                 # etc.; TIA Portal displays them as "Produktqueue[0]" instead.
                 for item in child.get_children():
@@ -195,13 +198,22 @@ class OpcUaClient(ProductionClient):
         node, data_value = self._prepare_field(parent_node, browse_name, value)
         node.set_data_value(data_value)
 
-    def write_order(self, root_node, order: MESAuftrag, auftragsart: int) -> None:
-        kopf_node = self._get_child(root_node, "Kopf")
-        inhalt_node = self._get_child(root_node, "Inhalt")
+    def write_order(
+        self,
+        root_node,
+        order: MESAuftrag,
+        auftragsart: int,
+        kopf_node: str = "Kopf",
+        inhalt_node: str = "Inhalt",
+        auftragssteuerung_node: str = "Auftragssteuerung_MES",
+        produktqueue_pattern: str = "Produktqueue[{index}]",
+    ) -> None:
+        kopf_node = self._get_child(root_node, kopf_node)
+        inhalt_node = self._get_child(root_node, inhalt_node)
         # Resolve all slots before changing order data, so an oversized queue
         # cannot leave a partially written order on the PLC.
         item_nodes = [
-            self._get_product_queue_item(inhalt_node, i)
+            self._get_product_queue_item(inhalt_node, i, produktqueue_pattern)
             for i in range(len(order.inhalt.Produktqueue))
         ]
         fields = [(kopf_node, name, value) for name, value in order.kopf.model_dump().items()]
@@ -215,7 +227,7 @@ class OpcUaClient(ProductionClient):
             for field_name, value in produkt.model_dump().items():
                 fields.append((item_node, field_name, value))
 
-        fields.append((kopf_node, "Auftragssteuerung_MES", 1))
+        fields.append((kopf_node, auftragssteuerung_node, 1))
         prepared = [self._prepare_field(parent, name, value) for parent, name, value in fields]
         for node, data_value in prepared:
             node.set_data_value(data_value)

@@ -18,6 +18,7 @@ Folgende offene Punkte wurden geklärt, um die Spec umsetzungsreif zu machen:
 - **Intervall-Grenzen:** Es wird ein vorläufiger Grenzwertbereich von 100 ms bis 10.000 ms festgelegt (siehe „Einstellungsfelder"). Die endgültige Bestätigung durch die Steuerungsgruppe bleibt unter „Offene Punkte" vermerkt.
 - **Zugriffsmodell:** Die Konfigurationsoberfläche bleibt vorerst ungeschützt, wie der Rest der Anwendung. Diese Spec führt keinen Zugriffsschutz ein; die im Issue gestellte Frage nach der Abgrenzung im „vorhandenen Zugangsmodell" entfällt, da aktuell kein Zugangsmodell existiert.
 - **Harness-Ablauf:** Die Abweichung vom Standardablauf (direkte Spec-Erstellung ohne vorgelagertes Idea-Dokument, Bugfix-Format auf dieses Feature adaptiert) wurde bestätigt und bleibt so bestehen.
+- **Nachtrag (Scope-Erweiterung):** Auf ausdrücklichen Nutzerwunsch wurden die strukturellen Kindknoten (`Kopf`, `Inhalt`, `Feedback`, `Auftragssteuerung_MES`, `StatusMES`, `Produktqueue[{index}]`), die im ursprünglichen Issue #32 und in den „Einstellungsfeldern“ explizit als nicht Gegenstand markiert waren, nachträglich ebenfalls konfigurierbar gemacht, da sich diese Namen laut Nutzer ändern können. Siehe „Einstellungsfelder (Nachtrag)“ und „Angepasste Methoden“.
 
 ## Description
 
@@ -45,6 +46,7 @@ Die MES-Einstellungen (OPC-UA-Zielnodes für Produktions- und Lieferaufträge, A
 - Ungültige Eingaben werden vollständig abgelehnt, ohne eine Teiländerung an den gespeicherten Werten vorzunehmen; die Ablehnung wird verständlich am betroffenen Feld bzw. als Meldung in der Oberfläche angezeigt.
 - Eine Änderung eines Zielnodes während eines aktiven Auftrags leitet diesen nicht unbemerkt um: Die Änderung wird bis zu einem sicheren Zeitpunkt zurückgestellt oder eindeutig zurückgewiesen.
 - Ladevorgang, Speichervorgang und erfolgreiche Übernahme der Einstellungen sind in der Oberfläche jeweils eigenständig erkennbar.
+- (Nachtrag) Die strukturellen Kindknoten unterhalb der Auftrags-Zielnodes (`Kopf`, `Inhalt`, `Feedback`, `Auftragssteuerung_MES`, `StatusMES`, `Produktqueue`-Namensmuster) sind als Baum einsehbar und editierbar, mit einer kurzen Beschreibung je Knoten; die Rollen-Struktur selbst (welcher Knoten unter welchem liegt) bleibt fest, nur die Browse-Namen sind editierbar.
 
 ## Reproduktion
 
@@ -60,6 +62,7 @@ Die MES-Einstellungen (OPC-UA-Zielnodes für Produktions- und Lieferaufträge, A
 - Die Fehlermeldung einer ungültigen Eingabe ist dem betroffenen Feld zugeordnet oder als Meldung in der Oberfläche sichtbar.
 - Eine Änderung eines Zielnodes während eines aktiven Auftrags wird zurückgestellt oder abgelehnt; der aktive Auftrag verwendet bis zu einem sicheren Zeitpunkt weiterhin den zuvor bestätigten Zielnode.
 - Ladevorgang, Speichervorgang und erfolgreiche Übernahme der Einstellungen sind in der Oberfläche jeweils eigenständig erkennbar.
+- (Nachtrag) Die strukturellen Kindknoten sind als editierbarer Baum mit Beschreibung dargestellt; eine Änderung eines Browse-Namens wirkt sich auf nachfolgende OPC-UA-Zugriffe aus, ohne den Rest der festen Baumstruktur zu verändern.
 
 ## Einstellungsfelder (Default-Werte)
 
@@ -70,6 +73,19 @@ Die bestehenden, im Code hartcodierten Browse-Namen werden als editierbare Defau
 | `opcua_node_production_order` | Ziel-Browse-Name für Produktionsaufträge unterhalb von `DB_MES_Schnittstelle` (ersetzt die Konstante `"MESAuftragProduktion"` in `production_queue.py:160`) | `"MESAuftragProduktion"` | nicht leer; finale Bestätigung durch Steuerungsgruppe ausstehend |
 | `opcua_node_delivery_order` | Ziel-Browse-Name für Lieferaufträge unterhalb von `DB_MES_Schnittstelle` (ersetzt die Konstante `"MESAuftragKommissionieren"` in `delivery_queue.py:160`) | `"MESAuftragKommissionieren"` | nicht leer; finale Bestätigung durch Steuerungsgruppe ausstehend |
 | `polling_interval_ms` | Abfrageintervall des PLC-Handshakes, Einheit Millisekunden (ersetzt die Konstante `POLL_INTERVAL_S = 0.5` in `plc_handshake.py:9`) | `500` | vorläufig 100–10.000; finale Grenzen durch Steuerungsgruppe ausstehend |
+
+## Einstellungsfelder (Nachtrag: strukturelle Kindknoten)
+
+Zusätzlich zu den oben genannten Feldern, auf ausdrücklichen Nutzerwunsch. Die Rollen-Struktur (welcher Knoten unter welchem liegt) ist technisch fest vorgegeben, da `OpcUaClient` sie so interpretiert; editierbar sind nur die Browse-Namen selbst.
+
+| Feld | Bedeutung | Default-Wert | Grenzen |
+|---|---|---|---|
+| `opcua_node_kopf` | Browse-Name des Kopf-Knotens (Auftragskopfdaten) unterhalb des Auftrags-Zielnodes | `"Kopf"` | nicht leer |
+| `opcua_node_inhalt` | Browse-Name des Inhalt-Knotens (Produktqueue) unterhalb des Auftrags-Zielnodes | `"Inhalt"` | nicht leer |
+| `opcua_node_feedback` | Browse-Name des Feedback-Knotens unterhalb des Auftrags-Zielnodes | `"Feedback"` | nicht leer |
+| `opcua_node_auftragssteuerung` | Browse-Name des Steuerungsfeldes unterhalb von `opcua_node_kopf` | `"Auftragssteuerung_MES"` | nicht leer |
+| `opcua_node_status` | Browse-Name des Statusfeldes unterhalb von `opcua_node_feedback` | `"StatusMES"` | nicht leer |
+| `opcua_node_produktqueue_pattern` | Namensmuster der Produktplätze unterhalb von `opcua_node_inhalt` | `"Produktqueue[{index}]"` | nicht leer; muss den Platzhalter `{index}` enthalten |
 
 ## Arbeitspakete
 
@@ -153,6 +169,33 @@ Während der Umsetzung wurden drei vom Feature unabhängige, aber blockierende D
 - **Änderung:** Neu erstellt (`settings`-Eintrag, `buildApiError`, `validateMockSettingsOrThrow`); `apiFetch`s Fehlerzweig nutzt jetzt `buildApiError` statt eines generischen `Error`.
 - **Erkenntnis:** Der Mock-Modus (`USE_MOCK`) spiegelt dieselben Validierungsgrenzen client-seitig, damit die Oberfläche auch ohne Backend ein realistisches Fehlerbild zeigt.
 - **Bezug:** „Die Fehlermeldung einer ungültigen Eingabe ist dem betroffenen Feld zugeordnet oder als Meldung in der Oberfläche sichtbar."
+
+### `OpcUaClient.read_auftragssteuerung` / `read_status_mes` / `write_auftragssteuerung` / `_get_product_queue_item` / `write_order` (Nachtrag)
+
+- **Datei:** `backend/app/clients/opc_ua_client.py`
+- **Typ:** `OpcUaClient`
+- **Aufgabe:** Lesen/Schreiben der strukturellen Kindknoten unterhalb eines Auftrags-Zielnodes.
+- **Änderung:** Alle fünf Methoden nehmen die strukturellen Browse-Namen jetzt als Parameter mit Default-Werten entgegen (z. B. `kopf_node: str = "Kopf"`), statt sie hartzucodieren. `read_status_mes` prüft jetzt exakt einen konfigurierten Namen statt automatisch zwischen `"StatusMES"`/`"Status_MES"` zu raten – die Rate-Logik ist mit der Konfigurierbarkeit überflüssig geworden. `_get_product_queue_item` leitet den Namen des Array-Containers aus dem Teil des Musters vor `[` ab.
+- **Erkenntnis:** Default-Werte entsprechen exakt den bisherigen Konstanten, wodurch bestehende Aufrufe ohne Settings-Bezug (z. B. in Tests) unverändert funktionieren.
+- **Bezug:** „Die strukturellen Kindknoten ... sind als Baum einsehbar und editierbar.“
+
+### `plc_handshake.wait_for_plc_ready` / `_wait_for_status` / `wait_for_plc_started` / `wait_for_plc_done` (Nachtrag)
+
+- **Datei:** `backend/app/workers/plc_handshake.py`
+- **Typ:** Modul `plc_handshake`
+- **Aufgabe:** PLC-Handshake (Bereitschaft, Start, Abschluss/Reset).
+- **Änderung:** Lesen die strukturellen Browse-Namen jetzt zu Beginn jeder Funktion über `settings_service.get_current_settings()` und reichen sie an die `OpcUaClient`-Methoden weiter.
+- **Erkenntnis:** `settings_service.apply_settings` importiert `plc_handshake` jetzt lokal (innerhalb der Funktion) statt auf Modulebene, da `plc_handshake` nun selbst `settings_service` importiert – ein Import auf Modulebene hätte einen zirkulären Import erzeugt.
+- **Bezug:** „Eine Änderung eines Browse-Namens wirkt sich auf nachfolgende OPC-UA-Zugriffe aus.“
+
+### `NodeTreeEditor` (Nachtrag)
+
+- **Datei:** `frontend/components/node-tree-editor.tsx`
+- **Typ:** React-Client-Komponente (neu)
+- **Aufgabe:** Zeigt die feste Rollen-Struktur (Kopf→Auftragssteuerung_MES, Inhalt→Produktqueue-Muster, Feedback→StatusMES) als auf-/zuklappbaren Baum mit kurzer Beschreibung je Knoten und je einem editierbaren Eingabefeld für den Browse-Namen.
+- **Änderung:** Neu erstellt; von `SettingsForm` unterhalb der bestehenden Felder eingebunden.
+- **Erkenntnis:** Die Baum-Struktur selbst ist als statische Konstante (`NODE_TREE`) im Component-Code hinterlegt, nicht generisch – nur die Blattwerte sind editierbar, da der Backend-Code die Rollen fest interpretiert (siehe `OpcUaClient`-Nachtrag).
+- **Bezug:** „Die strukturellen Kindknoten ... sind als Baum einsehbar und editierbar ... mit einer kurzen Beschreibung je Knoten.“
 
 ## Tests
 

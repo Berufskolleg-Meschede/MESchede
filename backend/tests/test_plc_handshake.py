@@ -29,7 +29,7 @@ def test_ready_acknowledges_a_finished_order_left_after_restart():
 
     asyncio.run(plc_handshake.wait_for_plc_ready(client, "root"))
 
-    client.write_auftragssteuerung.assert_called_once_with("root", 0)
+    client.write_auftragssteuerung.assert_called_once_with("root", 0, "Kopf", "Auftragssteuerung_MES")
     assert client.read_status_mes.call_count == 3
 
 
@@ -49,14 +49,16 @@ def test_done_does_not_treat_initial_idle_feedback_as_completion():
     events = []
     statuses = iter([0, 1, 5, 5, 0])
 
-    def read_status(root):
+    def read_status(root, feedback_node=None, status_node=None):
         status = next(statuses)
         events.append(("status", status))
         return status
 
     client.read_status_mes.side_effect = read_status
     client.read_auftragssteuerung.return_value = 0
-    client.write_auftragssteuerung.side_effect = lambda root, value: events.append(("command", value))
+    client.write_auftragssteuerung.side_effect = (
+        lambda root, value, kopf_node=None, auftragssteuerung_node=None: events.append(("command", value))
+    )
 
     asyncio.run(plc_handshake.wait_for_plc_done(client, "root"))
 
@@ -84,7 +86,7 @@ def test_reset_timeout_does_not_report_success():
     with pytest.raises(TimeoutError, match="PLC not ready.*status=5"):
         asyncio.run(plc_handshake.wait_for_plc_done(client, "root", reset_timeout_s=0))
 
-    client.write_auftragssteuerung.assert_called_once_with("root", 0)
+    client.write_auftragssteuerung.assert_called_once_with("root", 0, "Kopf", "Auftragssteuerung_MES")
 
 
 def test_start_timeout_is_reported():
@@ -116,10 +118,10 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
         async def disconnect(self):
             pass
 
-        def read_auftragssteuerung(self, root):
+        def read_auftragssteuerung(self, root, kopf_node=None, auftragssteuerung_node=None):
             return self.command
 
-        def read_status_mes(self, root):
+        def read_status_mes(self, root, feedback_node=None, status_node=None):
             if self.command == 1:
                 self.status = 1 if self.status == 0 else 5
             elif self.reset_pending:
@@ -129,13 +131,14 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
                 self.events.append("idle")
             return self.status
 
-        def write_order(self, root, order, kind):
+        def write_order(self, root, order, kind, kopf_node=None, inhalt_node=None,
+                         auftragssteuerung_node=None, produktqueue_pattern=None):
             assert kind == auftragsart
             assert self.command == 0 and self.status == 0
             self.command = 1
             self.events.append(f"start:{order.kopf.Auftragsnummer}")
 
-        def write_auftragssteuerung(self, root, value):
+        def write_auftragssteuerung(self, root, value, kopf_node=None, auftragssteuerung_node=None):
             assert self.status == 5 and value == 0
             self.command = 0
             self.reset_pending = True

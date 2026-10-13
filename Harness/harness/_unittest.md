@@ -95,6 +95,17 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 - **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
 - **Hinweis:** Diese Spec entscheidet sich für „klar zurückweisen" statt „zurückstellen und später automatisch anwenden" (siehe Entscheidungen in der Spec); Letzteres wurde nicht umgesetzt.
 
+## Strukturelle Kindknoten sind konfigurierbar und werden bei OPC-UA-Zugriffen verwendet (Nachtrag)
+
+- **Spec:** `spec/32-Konfigurationsoberfläche.md`
+- **Akzeptanzkriterium:** Die strukturellen Kindknoten (Kopf, Inhalt, Feedback, Auftragssteuerung_MES, StatusMES, Produktqueue-Namensmuster) sind als Baum einsehbar und editierbar; eine Änderung wirkt sich auf nachfolgende OPC-UA-Zugriffe aus.
+- **State:** Passed
+- **Testdatei:** `backend/tests/test_opc_ua_client.py`, `backend/tests/test_settings.py`
+- **Test:** `test_read_auftragssteuerung_resolves_renamed_structural_nodes`, `test_write_auftragssteuerung_resolves_renamed_structural_nodes`, `test_get_product_queue_item_resolves_a_custom_pattern`, `test_defaults_match_the_currently_hardcoded_structural_node_names`, `test_empty_or_blank_node_is_rejected` (erweitert), `test_produktqueue_pattern_without_index_placeholder_is_rejected`, `test_produktqueue_pattern_blank_is_rejected`, `test_produktqueue_pattern_is_trimmed`
+- **Prüft:** `OpcUaClient`-Methoden lösen umbenannte Kind-/Enkelknoten korrekt auf; `Settings`/`SettingsBase` lehnen leere Knotennamen sowie ein `opcua_node_produktqueue_pattern` ohne `{index}`-Platzhalter ab; Default-Werte entsprechen den bisherigen Konstanten.
+- **Ausführung:** `docker compose exec backend python -m pytest tests/test_opc_ua_client.py tests/test_plc_handshake.py tests/test_settings.py -q` → 74 bestanden.
+- **Hinweis:** Die bisherige automatische `StatusMES`/`Status_MES`-Schreibweisenerkennung in `read_status_mes` wurde entfernt, da der Name jetzt konfigurierbar ist; `test_read_status_mes_reads_feedback` übergibt die Schreibweise jetzt explizit als `status_node`-Parameter statt sie zu erraten. Der Baum-Editor selbst (`frontend/components/node-tree-editor.tsx`) ist mangels Frontend-Testframework nur manuell über `npm run build`/`npx eslint` und Code-Review geprüft, nicht über einen automatisierten UI-Test.
+
 ## Lade-, Speicher- und Übernahmezustand sind in der Oberfläche erkennbar
 
 - **Spec:** `spec/32-Konfigurationsoberfläche.md`

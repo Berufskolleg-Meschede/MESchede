@@ -8,11 +8,18 @@ import type { Settings } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { NodeTreeEditor } from '@/components/node-tree-editor'
 
 const EMPTY_SETTINGS: Settings = {
   opcua_node_production_order: '',
   opcua_node_delivery_order: '',
   polling_interval_ms: 500,
+  opcua_node_kopf: '',
+  opcua_node_inhalt: '',
+  opcua_node_feedback: '',
+  opcua_node_auftragssteuerung: '',
+  opcua_node_status: '',
+  opcua_node_produktqueue_pattern: '',
 }
 
 export function SettingsForm() {
@@ -151,6 +158,14 @@ export function SettingsForm() {
                   {fieldErrors.polling_interval_ms}
                 </p>
               )}
+            </div>
+
+            <div className="border-t border-border pt-5">
+              <NodeTreeEditor
+                settings={settings}
+                fieldErrors={fieldErrors}
+                onChange={(key, value) => setSettings(s => ({ ...s, [key]: value }))}
+              />
             </div>
 
             <Button
