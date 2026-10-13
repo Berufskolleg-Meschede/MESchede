@@ -4,7 +4,7 @@ import os
 from typing import Optional
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from ..clients.opc_ua_client import OpcUaClient
 from ..models.mes_auftrag import MESAuftrag
@@ -14,13 +14,27 @@ from .plc_handshake import (
     wait_for_plc_started as _wait_for_plc_started,
     wait_for_plc_done as _wait_for_plc_done,
 )
+from ..services.analytics import (
+    observe_run_completed,
+    observe_run_error,
+    observe_run_started,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DeliveryOrderPayload(BaseModel):
-    order_id: str
+    order_id: str = Field(min_length=1, max_length=128)
     mes_auftrag: MESAuftrag
+    _analytics_run_id: int | None = PrivateAttr(default=None)
+
+    @field_validator("order_id")
+    @classmethod
+    def strip_order_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("order_id darf nicht leer sein.")
+        return normalized
 
 
 delivery_queue: asyncio.Queue = asyncio.Queue()
@@ -108,9 +122,19 @@ async def _worker_loop() -> None:
                 _diagnostics.phase = "writing_order"
                 await _send_order(opc_client, root_node, order)
                 _diagnostics.phase = "waiting_for_plc_started"
-                await _wait_for_plc_started(opc_client, root_node)
+                start_status, start_observed_at = await _wait_for_plc_started(opc_client, root_node)
+                if start_status == 1:
+                    await asyncio.to_thread(
+                        observe_run_started, order._analytics_run_id, start_observed_at
+                    )
                 _diagnostics.phase = "waiting_for_completion_and_reset"
-                await _wait_for_plc_done(opc_client, root_node)
+                await _wait_for_plc_done(
+                    opc_client,
+                    root_node,
+                    on_completion=lambda observed_at: observe_run_completed(
+                        order._analytics_run_id, observed_at
+                    ),
+                )
                 _diagnostics.last_completed_order_id = order.order_id
                 _diagnostics.last_error = None
                 logger.info("Delivery order %s completed; PLC reset confirmed", order.order_id)
@@ -121,6 +145,9 @@ async def _worker_loop() -> None:
                 raise
             except Exception as error:
                 _diagnostics.last_error = f"{type(error).__name__}: {error}"
+                await asyncio.to_thread(
+                    observe_run_error, order._analytics_run_id, type(error).__name__
+                )
                 logger.exception("Delivery order %s failed", order.order_id)
                 try:
                     await opc_client.disconnect()

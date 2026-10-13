@@ -3,6 +3,7 @@ import type {
   ProductionOrder,
   DeliveryOrder,
   Machine,
+  AnalyticsRun,
   OrderFormData,
 } from './types'
 
@@ -59,6 +60,19 @@ function resolveArticle(article_id: number): Article | undefined {
 // ── API object ────────────────────────────────────────────────────────────────
 
 export const api = {
+  analytics: {
+    list: async (filters: { from?: string; to?: string; order_type?: 'production' | 'delivery' }): Promise<AnalyticsRun[]> => {
+      const query = new URLSearchParams()
+      if (filters.from) query.set('from', filters.from)
+      if (filters.to) query.set('to', filters.to)
+      if (filters.order_type) query.set('order_type', filters.order_type)
+      const queryString = query.toString()
+      const response = await fetch(`/api/analytics${queryString ? `?${queryString}` : ''}`, { cache: 'no-store' })
+      if (!response.ok) throw new Error(`Analytics API error ${response.status}`)
+      return response.json()
+    },
+  },
+
   articles: {
     list: async (): Promise<Article[]> => {
       if (USE_MOCK) return MOCK_ARTICLES

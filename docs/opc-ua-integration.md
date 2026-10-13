@@ -61,6 +61,16 @@ Production uses `AuftragsArt=1`; delivery/commissioning uses `AuftragsArt=4`.
 Both workers use the same handshake implementation and poll every 0.5 s.
 Neither worker writes to the HMI command or any feedback field.
 
+## Analytics data currently confirmed
+
+The currently documented PLC contract only confirms `StatusMES` values for ready,
+started, and completed states. It does not define a result counter or a per-product
+quality/result field. The MES records the times at which it observes status `1`
+and status `5`; a short order first seen at status `5` has no confirmed start time.
+Until the control group confirms result fields and their meaning, good, defective,
+and processed quantities remain unknown. `Inhalt.Anzahl` and the requested product
+queue describe the plan and must not be treated as produced output.
+
 ## Test on the isolated IoT network
 
 For PLC tests, use the VS Code **Backend (FastAPI, PLC debugging)** launch

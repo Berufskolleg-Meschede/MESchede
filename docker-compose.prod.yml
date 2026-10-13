@@ -37,6 +37,8 @@ services:
     image: ghcr.io/berufskolleg-meschede/meschede-frontend:${MES_IMAGE_TAG:-latest}
     container_name: MES-Frontend
     restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: http://MES-API:8000
     networks:
       - SmartFactory
     labels:
