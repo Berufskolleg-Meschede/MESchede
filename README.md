@@ -232,14 +232,45 @@ with RabbitMQClient() as client:
 2. Login mit den Zugangsdaten aus der `.env`
 3. **Queues → storage → Get Messages** um Nachrichten einzusehen
 
-### Consumer hinzufügen
+### Bestandsmeldungen an das MES (Vertragsentwurf)
+
+Der MES-Consumer liest eine separate Eingangsqueue. `storage` bleibt die vom MES beschriebene
+Ausgangsqueue und darf nicht zugleich als ERP-Eingangsqueue verwendet werden. Setze
+`RABBITMQ_STORAGE_INBOUND_QUEUE` erst auf die mit der Lager-/ERP-Gruppe abgestimmte Queue.
+
+Der im Backend erwartete Vertragsentwurf ist:
+
+```json
+{
+  "event_id": "eindeutige-ereignis-id",
+  "event_type": "snapshot",
+  "product_id": 42,
+  "quantity": 12,
+  "occurred_at": "2026-10-13T08:00:00Z"
+}
+```
+
+`event_type` ist `snapshot` oder `delta`. Snapshots setzen `quantity`, Änderungen setzen
+`quantity_delta`. Jede Nachricht enthält `occurred_at` mit Zeitzone und eine eindeutige
+`event_id` (alternativ AMQP `message_id`). Änderungen werden erst nach einem Snapshot für
+den Artikel angewendet; so wird ein unbekannter Bestand nicht als null behandelt. Duplikate
+werden anhand der Ereignis-ID ignoriert. Diese Felder und Regeln sind noch mit der
+Lager-/ERP-Gruppe zu bestätigen; ohne separate Eingangsqueue bleibt der Consumer deaktiviert.
+
+`STORAGE_STALE_AFTER_SECONDS` steuert, wann ein lange nicht aktualisierter Bestand als veraltet
+markiert wird (Vorgabewert: 3600 Sekunden; ebenfalls mit der Gruppe abzustimmen).
+
+### Beispiel für einen generischen Queue-Consumer
 
 ```python
 import pika, json, os
 
 connection = pika.BlockingConnection(pika.URLParameters(os.getenv("RABBITMQ_URL")))
 channel = connection.channel()
-channel.queue_declare(queue="storage", durable=True)
+queue_name = os.getenv("RABBITMQ_STORAGE_INBOUND_QUEUE")
+if not queue_name or queue_name == "storage":
+    raise RuntimeError("Eine separate Eingangsqueue für Lagerdaten konfigurieren")
+channel.queue_declare(queue=queue_name, passive=True)
 
 def callback(ch, method, properties, body):
     nachricht = json.loads(body)
@@ -247,7 +278,7 @@ def callback(ch, method, properties, body):
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 channel.basic_qos(prefetch_count=1)
-channel.basic_consume(queue="storage", on_message_callback=callback)
+channel.basic_consume(queue=queue_name, on_message_callback=callback)
 channel.start_consuming()
 ```
 

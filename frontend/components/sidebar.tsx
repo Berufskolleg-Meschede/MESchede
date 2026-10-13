@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Factory, Truck } from 'lucide-react'
+import { LayoutDashboard, Factory, Truck, Package } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
   { href: '/dashboard', label: 'Übersicht', icon: LayoutDashboard },
   { href: '/production-orders', label: 'Fertigungsaufträge', icon: Factory },
   { href: '/delivery-orders', label: 'Lieferaufträge', icon: Truck },
+  { href: '/inventory', label: 'Lagerbestände', icon: Package },
 ]
 
 export function Sidebar() {

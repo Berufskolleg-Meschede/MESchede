@@ -31,6 +31,22 @@ export interface Machine {
   status: MachineStatus
 }
 
+export interface StorageItem {
+  id: number | null
+  quantity: number | null
+  article_id: number
+  updated_at: string | null
+  article?: Article
+}
+
+export interface StorageStatus {
+  configured: boolean
+  connected: boolean
+  last_error: string | null
+  last_message_at: string | null
+  stale_after_seconds: number
+}
+
 export interface OrderFormData {
   quantity: number
   status: OrderStatus

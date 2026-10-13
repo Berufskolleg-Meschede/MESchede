@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from .routers import sites_router, storage_router, productionorders_router, deliveryorders_router
 from .workers.production_queue import start_worker, stop_worker
 from .workers.delivery_queue import start_delivery_worker, stop_delivery_worker
+from .workers.storage_consumer import start_storage_consumer, stop_storage_consumer
 
 logging.basicConfig(level=logging.INFO)
 # Keep MES progress visible without logging every OPC UA packet/browse/read.
@@ -17,12 +18,14 @@ app = FastAPI()
 async def start_background_workers() -> None:
 	await start_worker()
 	await start_delivery_worker()
+	start_storage_consumer()
 
 
 @app.on_event("shutdown")
 async def stop_background_workers() -> None:
 	await stop_worker()
 	await stop_delivery_worker()
+	stop_storage_consumer()
 
 app.include_router(router=sites_router.router)
 app.include_router(router=storage_router.router)
