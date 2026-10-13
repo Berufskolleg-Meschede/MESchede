@@ -35,6 +35,13 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
+    configured_connection = config.attributes.get("connection")
+    if configured_connection is not None:
+        context.configure(connection=configured_connection, target_metadata=target_metadata, compare_type=True)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     url = get_postgres_url("psycopg2")
     connectable = create_engine(url, poolclass=pool.NullPool)
 

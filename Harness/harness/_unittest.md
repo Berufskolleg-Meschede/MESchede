@@ -40,90 +40,145 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 
 ## Testkatalog
 
-## Settings werden persistiert und nach Neustart unverändert geladen
+## I29 – Auftragsidentität und wiederholte Annahme
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Gültige Zielnodes und ein gültiges Abfrageintervall lassen sich speichern und werden nach einem Neustart des Backends unverändert angezeigt.
-- **State:** Passed
-- **Testdatei:** `backend/tests/test_settings.py`
-- **Test:** `test_load_settings_creates_default_row_when_missing`, `test_load_settings_returns_the_persisted_row_unchanged`, `test_put_settings_persists_confirmed_values_and_updates_the_cache`
-- **Prüft:** Fehlende Settings-Zeile wird mit Default-Werten angelegt; eine vorhandene Zeile wird unverändert zurückgegeben (simuliert den Neustart-Fall); eine bestätigte Änderung wird in die Session committet.
-- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
-- **Hinweis:** Zusätzlich manuell über `curl` gegen die laufende Anwendung mit echter PostgreSQL-Instanz verifiziert (GET/PUT/GET zeigt den persistierten Wert).
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-18, AC-19: identische Annahme ohne zweiten Lauf; abweichender Inhalt ist Konflikt.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Gleiche fachliche ID bei unterschiedlichem Auftragstyp; gleiche und abweichende Payloads, auch nach Wiederanlauf.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Backend-Verhaltenstests; konkrete Testnamen erst aus der Implementierung übernehmen.
 
-## Backend verwendet nach einer Änderung ausschließlich die neuen Werte
+## I29 – Eindeutige Produkteinheiten und Ergebnismengen
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Das Backend verwendet nach einer bestätigten Änderung ausschließlich die neuen Werte für nachfolgende OPC-UA-Zugriffe.
-- **State:** Passed
-- **Testdatei:** `backend/tests/test_settings.py`
-- **Test:** `test_put_settings_persists_confirmed_values_and_updates_the_cache`, `test_apply_settings_updates_the_plc_handshake_poll_interval`, `test_production_worker_resolves_the_currently_configured_node_per_order`, `test_delivery_worker_resolves_the_currently_configured_node_per_order`
-- **Prüft:** Eine bestätigte Änderung aktualisiert den In-Memory-Cache und `plc_handshake.POLL_INTERVAL_S`; `production_queue`/`delivery_queue` lösen den Zielnode pro Auftrag anhand der aktuell im Cache stehenden Einstellung auf, nicht anhand eines beim Verbindungsaufbau zwischengespeicherten Wertes.
-- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
-- **Hinweis:** Keiner.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-07 bis AC-11: getrennte Mengen, Korrelation, keine Doppelzählung und unvollständige Ergebnisse.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Wiederholte Resultate, wiederverwendete PLC-Slots, fremde Läufe, unbekannte Ergebnisse und gemischte Gut-/Fehlresultate.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Verifizierte PLC-Vertragsbeispiele als Fixtures; keine erfundenen Statuscodes.
 
-## Ungültige Eingabe wird ohne Teiländerung abgelehnt
+## I29 – Globaler Startausschluss und FIFO
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Eine ungültige Eingabe (leerer Zielnode oder Intervall außerhalb von 100–10.000 ms) wird vollständig abgelehnt, ohne dass bereits gespeicherte Werte verändert werden.
-- **State:** Passed
-- **Testdatei:** `backend/tests/test_settings.py`
-- **Test:** `test_empty_or_blank_node_is_rejected`, `test_interval_outside_bounds_is_rejected`, `test_interval_at_bounds_is_accepted`
-- **Prüft:** Pydantic-Validierung lehnt leere/blanke Zielnodes sowie Intervalle außerhalb der Grenzen bereits beim Parsen des Request-Bodys ab, bevor der Endpoint-Code läuft; dadurch ist niemals eine Teiländerung an der DB-Zeile möglich.
-- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
-- **Hinweis:** Zusätzlich manuell über `curl` verifiziert: ungültiges PUT liefert 422, ein anschließendes GET zeigt die zuvor gespeicherten, unveränderten Werte.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-16, AC-17: höchstens ein Dispatch; ältester angenommener Auftrag zuerst.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Gleichzeitige Anforderungen beider Worker, gemischte Reihenfolge, gleiche Annahmezeit und ignorierte Produktions-/Lieferpriorität.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Zusätzlich Integrationstest für konkurrierende API-Aufrufe und dauerhaft gespeicherte Reihenfolge.
 
-## Fehlermeldung ist dem betroffenen Feld zugeordnet
+## I29 – Persistenz über Prozessneustart
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Die Fehlermeldung einer ungültigen Eingabe ist dem betroffenen Feld zugeordnet oder als Meldung in der Oberfläche sichtbar.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-14, AC-15, AC-20: Aufträge, Reihenfolge und mögliche Übergabe bleiben nachvollziehbar.
 - **State:** NotApplicable
-- **Testdatei:** Keine
-- **Test:** Keiner
-- **Prüft:** –
-- **Hinweis:** Kein Frontend-Testframework im Projekt vorhanden (`frontend/package.json` enthält keine Test-Dependency). Die Zuordnung ist stattdessen manuell verifiziert: das Backend liefert `detail: [{"loc": ["body", "<feldname>"], "msg": ...}]` (siehe `curl`-Verifikation der Settings-API), und `components/settings-form.tsx` mappt `loc[-1]` über `ApiValidationError.fieldErrors` auf das jeweilige Eingabefeld.
-- **Ausführung:** Noch nicht automatisiert ausgeführt.
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Neustart mit wartenden Aufträgen und Unterbrechung zwischen möglichem Startschreiben und Bestätigung.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Unit Tests allein können echte Persistenz über Prozessneustart nicht belegen; PostgreSQL-/Prozessintegration erforderlich.
 
-## Zielnode-Änderung während eines aktiven Auftrags wird abgelehnt
+## I29 – Wiederanlaufabgleich ohne Doppelstart
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Eine Änderung eines Zielnodes während eines aktiven Auftrags wird zurückgestellt oder abgelehnt; der aktive Auftrag verwendet bis zu einem sicheren Zeitpunkt weiterhin den zuvor bestätigten Zielnode.
-- **State:** Passed
-- **Testdatei:** `backend/tests/test_settings.py`
-- **Test:** `test_put_settings_rejects_production_node_change_during_an_active_production_order`, `test_put_settings_rejects_delivery_node_change_during_an_active_delivery_order`, `test_put_settings_allows_interval_change_while_an_order_is_active`
-- **Prüft:** Ist `production_queue.get_current_order_id()`/`delivery_queue.get_current_delivery_order_id()` nicht `None` und ändert sich der zugehörige Zielnode, wird die gesamte Anfrage mit 409 abgelehnt und die gespeicherte Zeile bleibt unverändert; eine reine Intervalländerung bleibt trotz aktivem Auftrag möglich.
-- **Ausführung:** `docker compose exec backend python -m pytest tests/test_settings.py -q` → bestanden.
-- **Hinweis:** Diese Spec entscheidet sich für „klar zurückweisen" statt „zurückstellen und später automatisch anwenden" (siehe Entscheidungen in der Spec); Letzteres wurde nicht umgesetzt.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-12, AC-13, AC-21: Annahme/Idle sind kein Abschluss; aktiver korrelierter Lauf wird nicht erneut gestartet.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Aktiver korrelierter Auftrag, sehr kurzer Lauf, fehlender Abschlussnachweis, fremder Auftrag und verlorene Verbindung.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Vorhandene Handshaketests bleiben Regressionseinstieg; simulierte PLC plus reale Abnahme erforderlich.
 
-## Strukturelle Kindknoten sind konfigurierbar und werden bei OPC-UA-Zugriffen verwendet (Nachtrag)
+## I29 – Globale Reviewsperre und Bereitschaft
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Die strukturellen Kindknoten (Kopf, Inhalt, Feedback, Auftragssteuerung_MES, StatusMES, Produktqueue-Namensmuster) sind als Baum einsehbar und editierbar; eine Änderung wirkt sich auf nachfolgende OPC-UA-Zugriffe aus.
-- **State:** Passed
-- **Testdatei:** `backend/tests/test_opc_ua_client.py`, `backend/tests/test_settings.py`
-- **Test:** `test_read_auftragssteuerung_resolves_renamed_structural_nodes`, `test_write_auftragssteuerung_resolves_renamed_structural_nodes`, `test_get_product_queue_item_resolves_a_custom_pattern`, `test_defaults_match_the_currently_hardcoded_structural_node_names`, `test_empty_or_blank_node_is_rejected` (erweitert), `test_produktqueue_pattern_without_index_placeholder_is_rejected`, `test_produktqueue_pattern_blank_is_rejected`, `test_produktqueue_pattern_is_trimmed`
-- **Prüft:** `OpcUaClient`-Methoden lösen umbenannte Kind-/Enkelknoten korrekt auf; `Settings`/`SettingsBase` lehnen leere Knotennamen sowie ein `opcua_node_produktqueue_pattern` ohne `{index}`-Platzhalter ab; Default-Werte entsprechen den bisherigen Konstanten.
-- **Ausführung:** `docker compose exec backend python -m pytest tests/test_opc_ua_client.py tests/test_plc_handshake.py tests/test_settings.py -q` → 74 bestanden.
-- **Hinweis:** Die bisherige automatische `StatusMES`/`Status_MES`-Schreibweisenerkennung in `read_status_mes` wurde entfernt, da der Name jetzt konfigurierbar ist; `test_read_status_mes_reads_feedback` übergibt die Schreibweise jetzt explizit als `status_node`-Parameter statt sie zu erraten. Der Baum-Editor selbst (`frontend/components/node-tree-editor.tsx`) ist mangels Frontend-Testframework nur manuell über `npm run build`/`npx eslint` und Code-Review geprüft, nicht über einen automatisierten UI-Test.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-22 bis AC-24: beide Startarten blockiert bis zur Prüfung und bestätigter PLC-Bereitschaft.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Produktionsreview sperrt Lieferung und umgekehrt; mehrere offene Reviews; Review erledigt bei weiterhin aktiver oder unbekannter PLC.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Alle Aufrufwege müssen dieselbe backendseitige Sperre respektieren.
 
-## Lade-, Speicher- und Übernahmezustand sind in der Oberfläche erkennbar
+## I29 – Review ohne Pflichtnotiz und gültige Mengen
 
-- **Spec:** `spec/32-Konfigurationsoberfläche.md`
-- **Akzeptanzkriterium:** Ladevorgang, Speichervorgang und erfolgreiche Übernahme der Einstellungen sind in der Oberfläche jeweils eigenständig erkennbar.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-27 bis AC-29: Bewertung und Mengen ohne Erklärung speicherbar; ungültige Angaben abgelehnt.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Bekannte/unkannte Mengen, negative und gebrochene Werte, Sollmengenüberschreitung und Widerspruch zu belegten PLC-Mengen.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Unfertige Einheiten gelten nicht automatisch als Fehlteile; Erfolg setzt Gutmenge nicht automatisch auf Sollmenge.
+
+## I29 – Review ohne Steuerungsbefehl oder Doppelzählung
+
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-30, AC-32, AC-40: Review steuert PLC nicht; Wiederholung/Konkurrenz überschreiben Ergebnisse nicht unbemerkt.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Kein Start/Stop/Reset beim Review; wiederholtes Speichern und konkurrierende Änderung derselben Bewertung.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Konkurrierende Speicheraufrufe zusätzlich mit Datenbankintegration prüfen.
+
+## I29 – Resultatsicherung vor Quittierung
+
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-39: verfügbare Endresultate werden vor möglichem Verlust durch MES-Quittierung dauerhaft gesichert.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Laufende mit nach Reset verschwindenden Resultaten; fehlgeschlagene Speicherung darf keinen stillen Datenverlust erzeugen.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** PLC-Simulator für Reihenfolge, PostgreSQL-Integration für Speicherbestätigung und Anlagenprüfung für tatsächlichen Datenlebenszyklus.
+
+## I29 – Quellenstatus und Aktualität
+
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-33 bis AC-36: gültige Resultate bleiben erhalten; Fehllesen erneuert keine Aktualität; stale/unknown bleiben erkennbar.
+- **State:** Planned
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Fehllesen, Reconnect, Zeitüberschreitung der konfigurierten Grenze, fehlende Erstbeobachtung und teilweise verfügbare Quelle.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Kontrollierte Uhr; keine echte Wartezeit nötig. Sichtbare UI-Kennzeichnung zusätzlich im Browser prüfen.
+
+## I29 – Seitenstruktur, Dashboard und Datenzustände
+
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-01 bis AC-06, AC-25, AC-26, AC-31, AC-37: getrennte Seiten, lesendes Dashboard, persistenter Prüfhinweis und Quellenkennzeichnung.
 - **State:** NotApplicable
-- **Testdatei:** Keine
-- **Test:** Keiner
-- **Prüft:** –
-- **Hinweis:** Kein Frontend-Testframework im Projekt vorhanden. Manuell geprüft: `npm run build` sowie ein SSR-Abruf von `/settings` zeigen den Ladezustand ("Lade Einstellungen…"); `components/settings-form.tsx` unterscheidet Laden (`loading`), Speichern (`saving`, Button-Text „Speichert…") und Übernahme (`savedAt`-Banner mit Zeitstempel) über getrennte State-Variablen.
-- **Ausführung:** Noch nicht automatisiert ausgeführt.
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Produktions-/Lieferansicht, Warte-/Produktqueue-Trennung, Dashboardlinks, manuell markierte Mengen, Reload und API-Ausfall ohne stillen Mock-Fallback.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** UI-/Browserprüfungen statt reiner Backend-Unit-Tests; bekannte/fehlende Daten jeweils prüfen.
 
-## RabbitMQ-Bestandsereignisse
+## I29 – Tastatur und responsive Bedienung
 
-- **Spec:** Keine; neues Feature, erfasst in `harness/ideas/I2 Lagerbestände per RabbitMQ übernehmen.md`.
-- **Akzeptanzkriterium:** Snapshots und Änderungen werden validiert und doppelte Ereignisse verändern den Bestand nicht erneut.
-- **State:** Implemented
-- **Testdatei:** `backend/tests/test_storage_consumer.py`
-- **Test:** `test_snapshot_persists_stock_and_duplicate_is_ignored`, `test_delta_without_snapshot_does_not_assume_zero`, `test_invalid_delta_is_rejected`, `test_message_id_can_supply_missing_event_id`
-- **Prüft:** Persistenz, Idempotenz, unbekannte Basisbestände und Pflichtfelder des Vertragsentwurfs.
-- **Ausführung:** Noch nicht ausgeführt; die Sitzung enthält weder pytest noch SQLModel.
-- **Hinweis:** Die Gruppenschnittstelle ist noch unbestätigt; Tests prüfen den dokumentierten Vertragsentwurf.
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-38: Prüfung, Navigation und Tabelleninteraktion sind per Tastatur bedienbar.
+- **State:** NotApplicable
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Fokusreihenfolge, Reviewdialog, Beschriftungen, Linkziele und Tabellen auf Projektgeräten.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Manuelle Browser-/Geräteprüfung; Unit Tests allein belegen Bedienbarkeit nicht.
+
+## I29 – Reale PLC-Korrelation und Laufabnahme
+
+- **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
+- **Akzeptanzkriterium:** AC-08, AC-10, AC-13, AC-20, AC-21, AC-24, AC-39: verifizierte Identitäten, Übergänge und Resultatsicherung.
+- **State:** NotApplicable
+- **Testdatei:** Noch nicht vorhanden
+- **Test:** Noch nicht vorhanden
+- **Prüft:** Realer Produktions- und Lieferlauf, kurze Läufe, alte Resultate, Abbruch/Reconnect/Neustart sowie Bereitschaft beider Slots.
+- **Ausführung:** Noch nicht ausgeführt
+- **Hinweis:** Anlagenprotokoll mit erwarteten/tatsächlichen Werten erforderlich. Keine Live-Abnahme allein aufgrund simulierter Tests.
