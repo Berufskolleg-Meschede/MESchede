@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from ..clients.opc_ua_client import OpcUaClient
 from ..models.mes_auftrag import MESAuftrag
+from ..services.settings_service import get_current_settings
 from .diagnostics import WorkerDiagnostics
 from .plc_handshake import (
     wait_for_plc_ready as _wait_for_plc_ready,
@@ -67,26 +68,17 @@ async def stop_worker() -> None:
 
 async def _worker_loop() -> None:
     opc_client: Optional[OpcUaClient] = None
-    root_node = None
     try:
         while True:
             if opc_client is None:
                 try:
                     _diagnostics.phase = "connecting"
                     opc_client = await _create_client()
-                    _diagnostics.phase = "discovering_nodes"
-                    root_node = await _get_root_node(opc_client)
-                    logger.info("Production worker: order node resolved: %s", root_node)
+                    logger.info("Production worker: connected to OPC UA server")
                 except Exception as error:
                     _diagnostics.last_error = f"{type(error).__name__}: {error}"
                     logger.exception("Failed to create OPC UA client")
-                    if opc_client is not None:
-                        try:
-                            await opc_client.disconnect()
-                        except Exception:
-                            logger.exception("Failed to disconnect after node discovery error")
                     opc_client = None
-                    root_node = None
                     _diagnostics.phase = "retrying_connection"
                     await asyncio.sleep(2.0)
                     continue
@@ -97,6 +89,10 @@ async def _worker_loop() -> None:
             _diagnostics.last_order_id = order.order_id
             logger.info("Production order %s: dequeued; checking PLC readiness", order.order_id)
             try:
+                _diagnostics.phase = "discovering_nodes"
+                node_name = get_current_settings().opcua_node_production_order
+                root_node = await _get_root_node(opc_client, node_name)
+                logger.info("Production order %s: order node resolved: %s", order.order_id, root_node)
                 _diagnostics.phase = "waiting_for_plc_ready"
                 await _wait_for_plc_ready(opc_client, root_node)
                 _diagnostics.phase = "rest_buffer"
@@ -127,7 +123,6 @@ async def _worker_loop() -> None:
                 except Exception:
                     logger.exception("Failed to disconnect after error")
                 opc_client = None
-                root_node = None
             finally:
                 _current_order = None
                 order_queue.task_done()
@@ -152,12 +147,12 @@ async def _create_client() -> OpcUaClient:
     return client
 
 
-async def _get_root_node(opc_client: OpcUaClient):
+async def _get_root_node(opc_client: OpcUaClient, node_name: str):
     loop = asyncio.get_running_loop()
     db_node = await opc_client.find_db_mes_schnittstelle()
     if db_node is None:
         raise KeyError("OPC UA node not found: 'DB_MES_Schnittstelle'")
-    return await loop.run_in_executor(None, opc_client._get_child, db_node, "MESAuftragProduktion")
+    return await loop.run_in_executor(None, opc_client._get_child, db_node, node_name)
 
 
 async def _send_order(opc_client: OpcUaClient, root_node, order: ProductionOrderPayload) -> None:

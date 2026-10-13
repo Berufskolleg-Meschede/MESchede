@@ -149,7 +149,7 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
         async def create_client():
             return plc
 
-        async def get_root(client):
+        async def get_root(client, node_name):
             return "root"
 
         monkeypatch.setattr(module, "_create_client", create_client)
