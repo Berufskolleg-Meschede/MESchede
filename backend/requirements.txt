@@ -43,7 +43,7 @@ rignore==0.7.6
 sentry-sdk==2.47.0
 shellingham==1.5.4
 six==1.17.0
-SQLAlchemy==2.0.44
+SQLAlchemy[asyncio]==2.0.44
 sqlmodel==0.0.34
 starlette==0.50.0
 typer==0.20.0
