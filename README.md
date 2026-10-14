@@ -26,8 +26,8 @@ The project follows a classic **three-tier architecture**, plus a direct OPC UA 
                             │ HTTP / REST
 ┌───────────────────────────▼──────────────────────────────┐
 │              FastAPI Backend (Port 8000)                  │
-│  /storage  /productionorder  /deliveryorder  /orders      │
-│              /settings  /analytics                        │
+│  /storage  /plc-storage  /productionorder  /deliveryorder │
+│  /orders  /settings  /analytics                            │
 └──────────┬────────────────────────────────┬───────────────┘
            │ SQLAlchemy / psycopg           │ OPC UA
 ┌──────────▼───────────────────┐  ┌─────────▼───────────────┐
@@ -51,6 +51,8 @@ The project follows a classic **three-tier architecture**, plus a direct OPC UA 
 ```
 
 A matching outbound publisher (`app/clients/rabbitmq/base.py`, a `storage` queue) exists in the codebase but is **not currently called from anywhere in the running application** — treat it as a building block for a future outbound flow, not as live behavior.
+
+The `/inventory` frontend page no longer reads this RabbitMQ-backed `/storage` data. It now polls `GET /plc-storage/`, which reads the housing (`LagerGehaeuse`), lid magazine (`MagazinDeckel_1`/`_2`) and high-rack (`LagerProdukte`) stock nodes directly from the PLC over OPC UA, through a dedicated single-threaded `PlcStorageGateway` (separate from the order-worker's PLC connection). The legacy `/storage` endpoints and the RabbitMQ consumer still exist and run, but currently have no frontend consumer.
 
 Development Compose starts PostgreSQL and the backend; start the frontend separately. Production Compose uses the published images and configures the frontend proxy to the backend.
 
@@ -86,13 +88,14 @@ MESchede/
 │   │   │   ├── deliveryorders_router.py
 │   │   │   ├── orders_router.py          # combined overview + manual review
 │   │   │   ├── settings_router.py        # OPC UA node/config management
+│   │   │   ├── plc_storage_router.py     # live PLC stock levels (housing/lids/high-rack)
 │   │   │   └── analytics_router.py
 │   │   ├── models/              # SQLModel database models + pydantic DTOs
-│   │   ├── domain/               # order/run state machine (phases, transitions)
+│   │   ├── domain/               # order/run state machine (phases, transitions); lager_snapshot.py (PLC stock DTOs)
 │   │   ├── repositories/        # persistence for the order pipeline
 │   │   ├── services/            # business logic (dispatch, analytics, reviews, settings)
 │   │   ├── workers/             # background order worker + RabbitMQ consumer
-│   │   ├── clients/             # OPC UA client + PLC order gateway (live); RabbitMQ outbound publisher (currently unused)
+│   │   ├── clients/             # OPC UA client + PLC order gateway (live) + PLC storage gateway (live); RabbitMQ outbound publisher (currently unused)
 │   │   └── db/                  # database connection and session management
 │   ├── alembic/                 # database migration scripts
 │   ├── tests/                   # pytest suite (unit + integration, simulated PLC)
@@ -124,6 +127,16 @@ All endpoints below are implemented by the routers under `backend/app/routers/`.
 | POST   | `/storage/{item_id}`             | Add new stock for an item            |
 | PATCH  | `/storage/{item_id}`             | Update stock for an item             |
 | PATCH  | `/storage/{item_id}/{amount}`    | Add or subtract stock by amount      |
+
+> `/storage` is fed by the inbound RabbitMQ consumer (see below) and still runs, but as of the live PLC stock feature below, no frontend page currently reads it.
+
+### PLC storage (live stock levels)
+
+| Method | Endpoint          | Description                          |
+|--------|-------------------|---------------------------------------|
+| GET    | `/plc-storage/`   | Live snapshot of housing (`LagerGehaeuse`), lid magazines (`MagazinDeckel_1`/`_2`) and high-rack (`LagerProdukte`) stock, read directly from the PLC over OPC UA; **503** if the PLC can't be reached |
+
+This is what the frontend's `/inventory` page actually polls. The node names are configurable the same way as the order nodes — see [Settings](#settings) and the Wiki's [Konfiguration](https://github.com/Berufskolleg-Meschede/MESchede/wiki/Konfiguration) page.
 
 ### Production & delivery orders
 
