@@ -1,9 +1,11 @@
 services:
   mes-db:
     image: postgres:18.1-alpine3.23
-    container_name: MES-Postgres
+    container_name: sf_mes_postgres
     restart: unless-stopped
     env_file: ./backend/.env.db
+    ports:
+      - "51032:5432"
     volumes:
       - postgres_mes_data:/var/lib/postgresql/data
     healthcheck:
@@ -14,13 +16,15 @@ services:
     networks:
       mes-backend:
         aliases:
-          - db
+          - mes-db
 
   backend:
     image: ghcr.io/berufskolleg-meschede/meschede-backend:${MES_IMAGE_TAG:-latest}
-    container_name: MES-API
+    container_name: sf_mes_backend
     restart: unless-stopped
     env_file: ./backend/.env
+    ports:
+      - "51031:8000"
     depends_on:
       mes-db:
         condition: service_healthy
@@ -35,8 +39,10 @@ services:
 
   mes-frontend:
     image: ghcr.io/berufskolleg-meschede/meschede-frontend:${MES_IMAGE_TAG:-latest}
-    container_name: MES-Frontend
+    container_name: sf_mes_interface
     restart: unless-stopped
+    ports:
+      - "51030:3000"
     networks:
       - SmartFactory
     labels:
