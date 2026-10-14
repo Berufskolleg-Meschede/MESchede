@@ -37,6 +37,66 @@ export interface OrderFormData {
   article_id: number
 }
 
+export interface StorageItem {
+  id: number | null
+  quantity: number | null
+  article_id: number
+  updated_at: string | null
+  article?: Article
+}
+
+export interface StorageStatus {
+  configured: boolean
+  connected: boolean
+  last_error: string | null
+  last_message_at: string | null
+  stale_after_seconds: number
+}
+
+export interface AnalyticsRun {
+  id: number
+  order_type: 'production' | 'delivery'
+  order_id: string
+  plc_order_number: number | null
+  planned_quantity: number | null
+  processed_quantity: number | null
+  good_quantity: number | null
+  defective_quantity: number | null
+  status: 'queued' | 'running' | 'completed' | 'unknown'
+  started_at: string | null
+  ended_at: string | null
+  created_at: string
+  last_observed_at: string | null
+  last_error_type: string | null
+}
+
+export interface Settings {
+  opcua_node_production_order: string
+  opcua_node_delivery_order: string
+  polling_interval_ms: number
+  opcua_node_kopf: string
+  opcua_node_inhalt: string
+  opcua_node_feedback: string
+  opcua_node_auftragssteuerung: string
+  opcua_node_status: string
+  opcua_node_produktqueue_pattern: string
+}
+
+export interface FieldErrorDetail {
+  loc: (string | number)[]
+  msg: string
+}
+
+export class ApiValidationError extends Error {
+  fieldErrors: Record<string, string>
+
+  constructor(message: string, fieldErrors: Record<string, string> = {}) {
+    super(message)
+    this.name = 'ApiValidationError'
+    this.fieldErrors = fieldErrors
+  }
+}
+
 export type OrderType = 'production' | 'delivery'
 export type RunPhase = 'queued' | 'preparing' | 'start_pending' | 'running' | 'completion_observed' |
   'awaiting_reset' | 'completed' | 'interrupted' | 'review_required'

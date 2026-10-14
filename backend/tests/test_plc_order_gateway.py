@@ -23,6 +23,7 @@ def gateway_tree():
     client.read_auftragssteuerung = MagicMock(return_value=1)
     gateway.client = client
     gateway.roots = {kind:root for kind in OrderType}
+    gateway.root_names = ('MESAuftragProduktion', 'MESAuftragKommissionieren', 'DB_MES_Schnittstelle')
     try:
         yield gateway,client,root,header,content,products
     finally:

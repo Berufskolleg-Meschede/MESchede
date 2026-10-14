@@ -38,12 +38,19 @@ class PlcGateway(Protocol):
 class PlcOrderGateway:
     """Serialisiert synchrone Clientoperationen in genau einem I/O-Thread."""
 
-    def __init__(self, url: str) -> None:
+    def __init__(self, url: str, settings_provider=None) -> None:
         """Legt Verbindungen erst bei einer tatsächlichen Operation an."""
         self.url = url
+        if settings_provider is None:
+            from app.services.settings_service import get_current_settings
+
+            settings_provider = get_current_settings
+        self.settings_provider = settings_provider
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mes-plc")
         self.client: OpcUaClient | None = None
+        self.connected = False
         self.roots: dict[OrderType, object] = {}
+        self.root_names: tuple[str, str, str] | None = None
 
     async def _invoke(self, operation):
         """Lässt eine begonnene I/O-Operation auch bei Taskcancel geordnet auslaufen."""
@@ -55,22 +62,32 @@ class PlcOrderGateway:
             raise
 
     def _root(self, kind: OrderType):
-        """Verbindet und löst beide bekannten Slotnamen auf dem I/O-Thread auf."""
+        """Löst konfigurierte Auftragsslots auf dem I/O-Thread auf."""
+        configured = self.settings_provider()
+        root_names = (
+            configured.opcua_node_production_order,
+            configured.opcua_node_delivery_order,
+            "DB_MES_Schnittstelle",
+        )
         if self.client is None:
             if not self.url:
                 raise ValueError("Die OPC-UA-Adresse ist nicht konfiguriert.")
             self.client = OpcUaClient(self.url)
+        if not self.roots or root_names != self.root_names:
             try:
-                self.client.client.connect()
+                if not self.connected:
+                    self.client.client.connect()
+                    self.connected = True
                 database = self.client._find_node_by_name_sync(
-                    self.client.client.get_objects_node(), "DB_MES_Schnittstelle", None,
+                    self.client.client.get_objects_node(), root_names[2], None,
                 )
                 if database is None:
-                    raise KeyError("DB_MES_Schnittstelle ist im OPC-UA-Server nicht vorhanden.")
+                    raise KeyError(f"{root_names[2]} ist im OPC-UA-Server nicht vorhanden.")
                 self.roots = {
-                    OrderType.PRODUCTION: self.client._get_child(database, "MESAuftragProduktion"),
-                    OrderType.DELIVERY: self.client._get_child(database, "MESAuftragKommissionieren"),
+                    OrderType.PRODUCTION: self.client._get_child(database, root_names[0]),
+                    OrderType.DELIVERY: self.client._get_child(database, root_names[1]),
                 }
+                self.root_names = root_names
             except Exception:
                 try:
                     self._disconnect()
@@ -90,25 +107,26 @@ class PlcOrderGateway:
     def _read_sync(self, kind: OrderType) -> PlcSnapshot:
         """Verhindert gemischte Produktresultate beim Wechsel der Auftragsnummer."""
         root = self._root(kind)
-        header = self.client._get_child(root, "Kopf")
+        configured = self.settings_provider()
+        header = self.client._get_child(root, configured.opcua_node_kopf)
         number = self.client._get_child(header, "Auftragsnummer").get_value()
-        initial_status = self.client.read_status_mes(root)
-        initial_command = self.client.read_auftragssteuerung(root)
-        content = self.client._get_child(root, "Inhalt")
-        count = self.client._get_child(content, "Anzahl").get_value()
+        initial_status = self.client.read_status_mes(root, configured.opcua_node_feedback, configured.opcua_node_status)
+        initial_command = self.client.read_auftragssteuerung(root, configured.opcua_node_kopf, configured.opcua_node_auftragssteuerung)
+        content = self.client._get_child(root, configured.opcua_node_inhalt)
+        count = self.client.read_anzahl(root, configured.opcua_node_inhalt)
         if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 255:
             raise ValueError("Die PLC liefert eine ungültige Produktanzahl.")
         products = []
         for index in range(count):
-            item = self.client._get_product_queue_item(content, index)
+            item = self.client._get_product_queue_item(content, index, configured.opcua_node_produktqueue_pattern)
             products.append(ProductObservation(
                 index, self._optional_value(item, "ProduktID"), self._optional_value(item, "Seriennummer"),
                 self._optional_value(item, "Sequenznummer"), self._optional_value(item, "Status"),
                 self._optional_value(item, "Fehlercode"),
             ))
-        status = self.client.read_status_mes(root)
-        command = self.client.read_auftragssteuerung(root)
-        final_count = self.client.read_anzahl(root)
+        status = self.client.read_status_mes(root, configured.opcua_node_feedback, configured.opcua_node_status)
+        command = self.client.read_auftragssteuerung(root, configured.opcua_node_kopf, configured.opcua_node_auftragssteuerung)
+        final_count = self.client.read_anzahl(root, configured.opcua_node_inhalt)
         final_number = self.client._get_child(header, "Auftragsnummer").get_value()
         if (final_number, final_count, status, command) != (number, count, initial_status, initial_command):
             raise ValueError("Der PLC-Auftragszustand änderte sich während der Beobachtung.")
@@ -125,7 +143,12 @@ class PlcOrderGateway:
         def operation():
             """Schreibt den ausgewählten Auftrag ausschließlich im I/O-Thread."""
             root = self._root(kind)
-            self.client.write_order(root, payload, 1 if kind == OrderType.PRODUCTION else 4)
+            configured = self.settings_provider()
+            self.client.write_order(
+                root, payload, 1 if kind == OrderType.PRODUCTION else 4,
+                configured.opcua_node_kopf, configured.opcua_node_inhalt,
+                configured.opcua_node_auftragssteuerung, configured.opcua_node_produktqueue_pattern,
+            )
         await self._invoke(operation)
 
     async def acknowledge(self, kind: OrderType, expected_order_number: int) -> None:
@@ -133,22 +156,26 @@ class PlcOrderGateway:
         def operation():
             """Quittiert den passenden Slot ohne Änderung an HMI oder Feedback."""
             root = self._root(kind)
-            header = self.client._get_child(root, "Kopf")
+            configured = self.settings_provider()
+            header = self.client._get_child(root, configured.opcua_node_kopf)
             if self.client._get_child(header, "Auftragsnummer").get_value() != expected_order_number:
                 raise ValueError("Die PLC-Auftragsidentität änderte sich vor dem Reset.")
-            if self.client.read_status_mes(root) != 5 or self.client.read_auftragssteuerung(root) != 1:
+            if (self.client.read_status_mes(root, configured.opcua_node_feedback, configured.opcua_node_status) != 5 or
+                    self.client.read_auftragssteuerung(root, configured.opcua_node_kopf, configured.opcua_node_auftragssteuerung) != 1):
                 raise ValueError("Der PLC-Abschluss ist vor dem Reset nicht mehr bestätigt.")
-            self.client.clear_product_queue(root)
-            self.client.write_anzahl(root, 0)
-            if self.client.read_anzahl(root) != 0:
+            self.client.clear_product_queue(root, configured.opcua_node_inhalt, configured.opcua_node_produktqueue_pattern)
+            self.client.write_anzahl(root, 0, configured.opcua_node_inhalt)
+            if self.client.read_anzahl(root, configured.opcua_node_inhalt) != 0:
                 raise ValueError("Die PLC-Produktanzahl wurde beim Reset nicht auf null bestätigt.")
-            self.client.write_auftragssteuerung(root, 0)
+            self.client.write_auftragssteuerung(root, 0, configured.opcua_node_kopf, configured.opcua_node_auftragssteuerung)
         await self._invoke(operation)
 
     def _disconnect(self) -> None:
         """Beendet die Clientverbindung auf demselben I/O-Thread."""
         client, self.client = self.client, None
+        self.connected = False
         self.roots = {}
+        self.root_names = None
         if client is not None:
             client.client.disconnect()
 

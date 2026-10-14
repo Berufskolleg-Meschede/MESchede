@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import replace
 
 from opcua import ua
 from app.clients.plc_order_gateway import PlcGateway
@@ -56,6 +57,15 @@ class OrderWorkerHost:
             self.phase = "failed"
             self.last_error = str(error)
             logger.error("Der Auftragsworker wurde unerwartet beendet.", exc_info=(type(error), error, error.__traceback__))
+
+    def update_poll_interval(self, interval_s: float) -> None:
+        """Übernimmt ein bestätigtes Anlagenintervall in Polling und Dispatch."""
+        self.settings = replace(
+            self.settings,
+            poll_interval_s=interval_s,
+            stale_after_s=max(self.settings.stale_after_s, interval_s * 2),
+        )
+        self.dispatch.settings = self.settings
 
     async def _run(self) -> None:
         """Beobachtet beide Slots, bevor der gemeinsame Dispatch weitergeführt wird."""

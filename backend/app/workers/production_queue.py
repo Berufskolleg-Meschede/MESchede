@@ -23,6 +23,17 @@ def get_worker_status() -> dict:
     return _host.diagnostics(OrderType.PRODUCTION)
 
 
+def get_current_order_id() -> str | None:
+    """Erhält den bestehenden Settings-Endpunkt trotz gemeinsamem Worker."""
+    return get_worker_status().get("current_order_id")
+
+
+def update_poll_interval(interval_s: float) -> None:
+    """Übernimmt Settingsänderungen in den gemeinsam genutzten Worker."""
+    if _host is not None:
+        _host.update_poll_interval(interval_s)
+
+
 async def start_worker() -> None:
     """Startet nur den gebundenen gemeinsamen Worker und keine unabhängige Schleife."""
     if _host is None:

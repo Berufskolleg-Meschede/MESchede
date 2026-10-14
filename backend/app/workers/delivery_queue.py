@@ -23,6 +23,11 @@ def get_worker_status() -> dict:
     return _host.diagnostics(OrderType.DELIVERY)
 
 
+def get_current_delivery_order_id() -> str | None:
+    """Erhält den bestehenden Settings-Endpunkt trotz gemeinsamem Worker."""
+    return get_worker_status().get("current_order_id")
+
+
 async def start_delivery_worker() -> None:
     """Startet nur den gebundenen gemeinsamen Worker und keine zweite Startvergabe."""
     if _host is None:
