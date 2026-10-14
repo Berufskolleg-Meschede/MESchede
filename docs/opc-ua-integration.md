@@ -7,10 +7,11 @@ in the June integration design.
 ## Node changes
 
 Both `DB_MES_Schnittstelle.MESAuftragProduktion` and the commissioning slot use
-this interface. The commissioning slot is spelled **`MESAuftragKommisionieren`**
-(one `s`) in the current PLC screenshots. The client accepts this spelling as
-well as `MESAuftragKommissionieren` (two `s`), preferring the exact requested
-name if both exist. No other node is used as a fallback.
+this interface. The commissioning slot default is **`MESAuftragKommissionieren`**
+(two `s`), matching the corrected PLC spelling. For compatibility, the client
+also accepts the former spelling `MESAuftragKommisionieren` (one `s`), while
+preferring the exact configured name if both exist. No other node is used as a
+fallback.
 
 | Node | MES behavior |
 | --- | --- |
@@ -225,8 +226,9 @@ Match the endpoint to the observed PLC slot: `/productionorder/` uses
 `MESAuftragProduktion`; `/deliveryorder/` uses the commissioning slot. A `404`
 for `/` or `/favicon.ico` is harmless; those routes are not implemented.
 
-For the commissioning slot, expect `OPC UA child MESAuftragKommissionieren
-resolved using PLC spelling MESAuftragKommisionieren`. Missing-child errors
+For the commissioning slot, expect the exact `MESAuftragKommissionieren` node
+to resolve without an alias. If the former PLC spelling is still present, logs
+may report `resolved using PLC spelling MESAuftragKommisionieren`. Missing-child errors
 include the parent NodeId and available child names, which distinguish a naming
 mismatch from a node not exposed by the OPC UA server. A TIA Portal data-block
 view shows PLC variables but does not itself prove the server's browse names.

@@ -9,11 +9,16 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   build-backend:
+    # Publishing is only permitted from the protected main branch. PRs and
+    # manual runs on other refs must never receive package write permission.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,7 +53,11 @@ jobs:
             ${{ steps.vars.outputs.sha }}
 
   build-frontend:
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
