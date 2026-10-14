@@ -7,8 +7,15 @@ export const dynamic = 'force-dynamic'
 async function proxyBackendRequest(request: Request, context: RouteContext): Promise<Response> {
   const { path } = await context.params
   const backendUrl = process.env.BACKEND_INTERNAL_URL ?? 'http://localhost:8000'
-  const targetUrl = new URL(`/${path.map(encodeURIComponent).join('/')}`, backendUrl)
-  targetUrl.search = new URL(request.url).search
+  const requestUrl = new URL(request.url)
+  // Next.js normalisiert eingehende Pfade ohne abschließenden Slash, bevor dieser Handler
+  // läuft. Die Backend-Router erwarten ihn aber auf der Ressourcenwurzel (z.B. /settings/,
+  // /storage/) und würden sonst per 308 auf eine absolute Backend-URL umleiten, der der
+  // Browser cross-origin folgt (CORS-Fehler). Collection-Routen bestehen hier immer aus genau
+  // einem Pfadsegment; Einzelressourcen (/storage/5, /storage/status) aus mehreren.
+  const trailingSlash = path.length === 1 ? '/' : ''
+  const targetUrl = new URL(`/${path.map(encodeURIComponent).join('/')}${trailingSlash}`, backendUrl)
+  targetUrl.search = requestUrl.search
 
   const headers = new Headers(request.headers)
   headers.delete('host')
