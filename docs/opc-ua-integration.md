@@ -248,10 +248,15 @@ feedback, count, and queue item values. A start timeout means the command was
 written but started/finished feedback was not observed; a reset timeout means
 the PLC did not confirm idle after acknowledgement.
 
-Current limitation: queues live only in the backend process. Restarting clears
-pending jobs; failed jobs are logged and removed, without a durable API order
-status or automatic re-execution. Read-phase recovery does not retry physical
-start commands. Do not interpret `202` as a durable ERP acknowledgement.
+Order requests and run state are persisted in PostgreSQL. A `202` confirms
+durable admission, not dispatch or completion. The shared worker reconciles
+stored run state after restart instead of replaying a start blindly.
+
+For Issue #29, a correlated `StatusMES=5` marks the order completed. Known,
+explicitly mapped product failures remain in the failed count; missing or
+unmapped unit results count as successful. If the PLC command was already
+manually reset to `0` after a stored completion, the worker accepts the idle
+state and releases the reservation without reopening a stale review.
 
 ## Local regression tests
 

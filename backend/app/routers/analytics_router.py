@@ -18,7 +18,11 @@ def get_runs(
     runs = list_runs(from_date, to_date, order_type)
     for run in runs:
         for field in ("created_at", "started_at", "ended_at", "last_observed_at"):
-            value = getattr(run, field)
+            value = run[field] if isinstance(run, dict) else getattr(run, field)
             if value is not None and value.tzinfo is None:
-                setattr(run, field, value.replace(tzinfo=timezone.utc))
+                value = value.replace(tzinfo=timezone.utc)
+                if isinstance(run, dict):
+                    run[field] = value
+                else:
+                    setattr(run, field, value)
     return runs

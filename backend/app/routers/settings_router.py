@@ -66,5 +66,6 @@ async def put_settings(
     await session.refresh(current)
 
     settings_service.apply_settings(current)
+    production_queue.update_poll_interval(current.polling_interval_ms / 1000)
 
     return current

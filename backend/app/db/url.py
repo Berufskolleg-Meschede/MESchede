@@ -21,8 +21,11 @@ def get_postgres_url(driver: str = "psycopg2") -> str:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         url_obj = make_url(database_url).set(drivername=f"postgresql+{driver}")
-        # Force IPv4 by replacing 'localhost' with '127.0.0.1' to avoid IPv6 issues
-        if url_obj.host == "localhost":
+        host_override = os.getenv("DATABASE_HOST_OVERRIDE")
+        if host_override:
+            url_obj = url_obj.set(host=host_override)
+        # Force IPv4 for local development to avoid IPv6 resolution differences.
+        elif url_obj.host == "localhost":
             url_obj = url_obj.set(host="127.0.0.1")
         return url_obj.render_as_string(hide_password=False)
 

@@ -276,7 +276,28 @@ These facts describe the current implementation; they are not permission to pres
 
 Do not claim production readiness, live synchronization, persistence, or complete accessibility based on the appearance of the prototype.
 
+## Issue 29: agreed order overview and recovery
+
+The following is agreed target behavior for issue #29; it does not change the current implementation gaps described above. The detailed contract and acceptance criteria are in `../../docs/specs/issue-29-order-production-overview.md`.
+
+- Extend the existing production and delivery pages as separate operational views. Distinguish waiting MES orders from product units belonging to the active run.
+- Keep the dashboard as a separate, read-only summary of both areas. Retain the order type beside IDs and links so equal IDs cannot be confused.
+- Show planned, processed, successful, and failed quantities separately. Missing product results remain visibly incomplete; unknown quantities are not confirmed zero values.
+- Mark connectivity and freshness independently from the order's last known business state. Do not switch silently to demo data after a connection failure.
+- Display unresolved run reviews when opening the app and after reload. A dashboard warning links to the corresponding order page; review inputs live on that page.
+- The review records the run outcome and known successful/failed quantities without a required explanation or free-text note. Unknown quantities remain unknown, and manual results are labelled as manual.
+- Reviewing a run does not send PLC start, stop, or reset commands. Open required reviews block new starts of both order types; resolving a review alone does not prove machine readiness.
+- Display one shared dispatch order across production and delivery, oldest accepted first. The MES allows only one active dispatch across both types.
+- Manual order creation/start belongs to the separate issue #30. This overview work does not turn the demo status selector into an authoritative live-run control.
+
 ## Completion checklist for UI changes
+
+Issue #29 completion displays mapped successful and failed unit results. A
+correlated completed PLC order assumes success for missing or unmapped unit
+signals and does not require a manual review. Keep the quantity origin visible
+when the UI labels assumed success. If a stored completion is already at PLC
+idle after a manual command reset, show it as completed and clear the stale
+review notice.
 
 Before considering a UI or UX change complete:
 

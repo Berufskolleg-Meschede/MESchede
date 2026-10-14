@@ -10,7 +10,19 @@ import {
   type StorageItem,
   type StorageStatus,
   type AnalyticsRun,
+  type OrderOverview,
+  type OrderPageData,
+  type OrderRunView,
+  type OrderType as RunOrderType,
+  type OrderStatus as RunOrderStatus,
+  type RunReview,
+  type ReviewResult,
 } from './types'
+import { OrderApiClient, OrderApiError } from './order-api'
+
+export { OrderApiClient, OrderApiError }
+
+const orderApi = new OrderApiClient()
 
 const USE_MOCK = true
 const BASE_URL = '/api'
@@ -135,6 +147,12 @@ function validateMockSettingsOrThrow(data: Settings): void {
 // ── API object ────────────────────────────────────────────────────────────────
 
 export const api = {
+  list: (type: RunOrderType, options?: { offset?: number; search?: string; status?: RunOrderStatus | 'all' }, signal?: AbortSignal): Promise<OrderPageData> =>
+    orderApi.list(type, options, signal),
+  overview: (signal?: AbortSignal): Promise<OrderOverview> => orderApi.overview(signal),
+  detail: (type: RunOrderType, orderId: string): Promise<OrderRunView> => orderApi.detail(type, orderId),
+  review: (runId: string, data: RunReview): Promise<ReviewResult> => orderApi.review(runId, data),
+
   analytics: {
     list: async (filters: { from?: string; to?: string; order_type?: 'production' | 'delivery' }): Promise<AnalyticsRun[]> => {
       const query = new URLSearchParams()

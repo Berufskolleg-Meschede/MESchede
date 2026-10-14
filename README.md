@@ -43,7 +43,7 @@ Storage changes are published to **RabbitMQ** (running on the NAS) so external s
                                           └─────────────────────────┘
 ```
 
-All three core services are orchestrated together using **Docker Compose**.
+Development Compose starts PostgreSQL and the backend; start the frontend separately. Production Compose uses the published images and configures the frontend proxy to the backend.
 
 ---
 
@@ -101,7 +101,6 @@ MESchede/
 
 | Method | Endpoint                         | Description                          |
 |--------|----------------------------------|--------------------------------------|
-| GET    | `/sites/`                        | List all factory sites               |
 | GET    | `/storage/`                      | List entire storage inventory        |
 | GET    | `/storage/{item_id}`             | Get stock for a specific item        |
 | POST   | `/storage/{item_id}`             | Add new stock for an item            |
@@ -110,13 +109,11 @@ MESchede/
 | GET    | `/productionorder/`              | List all production orders           |
 | GET    | `/productionorder/{id}`          | Get a single production order        |
 | POST   | `/productionorder/`              | Create a new production order        |
-| PATCH  | `/productionorder/{id}`          | Update a production order            |
-| DELETE | `/productionorder/{id}`          | Delete a production order            |
 | GET    | `/deliveryorder/`                | List all delivery orders             |
 | GET    | `/deliveryorder/{id}`            | Get a single delivery order          |
 | POST   | `/deliveryorder/`                | Create a new delivery order          |
-| PATCH  | `/deliveryorder/{id}`            | Update a delivery order              |
-| DELETE | `/deliveryorder/{id}`            | Delete a delivery order              |
+
+Issue 29 adds `GET /orders/overview`, diagnostics at each `/queue-status`, and `POST /orders/runs/{run_id}/reviews`. Order IDs are strings. `POST` confirms durable acceptance with `202`; it does not confirm execution. Create/edit/delete/manual-start UI is deferred to issue 30. See [the approved spec and verification](docs/specs/issue-29-order-production-overview.md).
 
 ### External API (Azubi-ERP Integration)
 
@@ -153,7 +150,7 @@ MESchede/
 ```
 
 4. The services will be available at:
-   - **Frontend**: http://localhost:3000
+   - **Frontend**: http://localhost:3000 after starting it separately with `npm run dev`
    - **Backend API**: http://localhost:8000
    - **API Docs (Swagger)**: http://localhost:8000/docs
    - **Database**: localhost:5432

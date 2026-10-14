@@ -158,7 +158,7 @@ export default function AnalyticsPage() {
                   <TableCell className="px-5 py-3.5"><span className="font-mono text-xs">#{run.order_id}</span><span className="ml-2 text-xs text-muted-foreground">PLC #{run.plc_order_number ?? '–'}</span></TableCell>
                   <TableCell>{run.order_type === 'production' ? 'Produktion' : 'Lieferung'}</TableCell>
                   <TableCell className="text-sm">
-                    {run.status === 'queued' ? 'Wartet' : run.status === 'running' ? 'Läuft' : run.status === 'completed' ? 'Abgeschlossen' : (
+                    {run.status === 'queued' ? 'Wartet' : run.status === 'running' ? 'Läuft' : run.status === 'completed' ? 'Abgeschlossen' : run.status === 'review_required' ? 'Prüfung nötig' : (
                       <span title={run.last_error_type ?? undefined}>
                         Laufstatus unbekannt
                         {run.last_error_type && <span className="block text-xs text-muted-foreground">{run.last_error_type === 'BackendRestart' ? 'nach Backend-Neustart' : 'Steuerungsrückmeldung ausgefallen'}</span>}

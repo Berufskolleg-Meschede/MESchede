@@ -3,10 +3,13 @@
 from datetime import date, datetime, time, timezone
 import logging
 
-from sqlalchemy import select, update, func
+from sqlalchemy import select, update, func, case
 
 from app.db.session import SessionLocal
 from app.models.production_run import ProductionRun
+from app.models.mes_order import MesOrderRecord
+from app.models.order_run_record import OrderRunRecord
+from app.models.product_unit_record import ProductUnitRecord
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +120,7 @@ def list_runs(
     from_date: date | None,
     to_date: date | None,
     order_type: str | None,
-) -> list[ProductionRun]:
+) -> list[dict]:
     statement = select(ProductionRun)
     observed_day = func.coalesce(ProductionRun.started_at, ProductionRun.created_at)
     if from_date is not None:
@@ -138,11 +141,50 @@ def list_runs(
         statement = statement.where(ProductionRun.order_type == order_type)
     statement = statement.order_by(ProductionRun.created_at.desc(), ProductionRun.id.desc())
     with SessionLocal() as session:
-        rows = list(session.execute(statement).scalars().all())
-        for run in rows:
+        legacy = list(session.execute(statement).scalars().all())
+        current_statement = select(
+            MesOrderRecord, OrderRunRecord,
+            func.count(ProductUnitRecord.id).label("planned"),
+            func.sum(case((ProductUnitRecord.result == "good", 1), else_=0)).label("good"),
+            func.sum(case((ProductUnitRecord.result == "failed", 1), else_=0)).label("failed"),
+        ).join(OrderRunRecord, OrderRunRecord.order_ref == MesOrderRecord.id).outerjoin(
+            ProductUnitRecord, ProductUnitRecord.run_id == OrderRunRecord.id,
+        )
+        if order_type is not None:
+            current_statement = current_statement.where(MesOrderRecord.order_type == order_type)
+        observed_day = func.coalesce(OrderRunRecord.started_at, MesOrderRecord.accepted_at)
+        if from_date is not None:
+            current_statement = current_statement.where(observed_day >= datetime.combine(from_date, time.min, tzinfo=timezone.utc))
+        if to_date is not None:
+            current_statement = current_statement.where(observed_day < datetime.combine(date.fromordinal(to_date.toordinal() + 1), time.min, tzinfo=timezone.utc))
+        current_statement = current_statement.group_by(MesOrderRecord.id, OrderRunRecord.id).order_by(observed_day.desc())
+        current = session.execute(current_statement).all()
+        rows = []
+        current_keys = {(order.order_type, order.order_id) for order, *_ in current}
+        for run in legacy:
+            if (run.order_type, run.order_id) in current_keys:
+                continue
             if run.good_quantity is not None and run.defective_quantity is not None:
                 run.processed_quantity = run.good_quantity + run.defective_quantity
-        return rows
+            rows.append(run.model_dump())
+        for order, run, planned, good, failed in current:
+            status = (
+                "review_required" if run.review_required else
+                "unknown" if run.phase == "interrupted" else
+                "completed" if run.phase in {"completed", "completion_observed", "awaiting_reset"} else
+                "running" if run.started_at else "queued"
+            )
+            rows.append({
+                "id": -order.accepted_sequence, "order_type": order.order_type, "order_id": order.order_id,
+                "plc_order_number": order.plc_order_number, "planned_quantity": planned,
+                "processed_quantity": (good or 0) + (failed or 0) if run.result_observed else None,
+                "good_quantity": (good or 0) if run.result_observed else None,
+                "defective_quantity": (failed or 0) if run.result_observed else None,
+                "status": status, "started_at": run.started_at, "ended_at": run.ended_at,
+                "created_at": order.accepted_at, "last_observed_at": run.ended_at or run.started_at,
+                "last_error_type": run.review_reason if run.review_required else None,
+            })
+        return sorted(rows, key=lambda row: _naive_utc(row["started_at"] or row["created_at"]), reverse=True)
 
 
 def mark_interrupted_runs_unknown() -> None:
