@@ -12,6 +12,7 @@ from app.repositories.order_repository import OrderRepository
 from app.repositories.worker_leadership import WorkerLeadership
 from app.services.order_dispatch_service import OrderDispatchService
 from app.services.order_recovery_service import OrderRecoveryService
+from app.services.storage_outbox import publish_pending_storage_events
 from app.settings import OrderSettings
 
 
@@ -33,6 +34,7 @@ class OrderWorkerHost:
         self.phase = "stopped"
         self.last_error: str | None = None
         self.recovering = True
+        self._next_storage_outbox_attempt = 0.0
 
     @property
     def running(self) -> bool:
@@ -77,6 +79,14 @@ class OrderWorkerHost:
                     await asyncio.sleep(self.settings.poll_interval_s)
                     continue
                 await self.leadership.assert_owned()
+                now = asyncio.get_running_loop().time()
+                if now >= self._next_storage_outbox_attempt:
+                    try:
+                        await asyncio.to_thread(publish_pending_storage_events, self.repository.engine)
+                        self._next_storage_outbox_attempt = now
+                    except Exception as error:
+                        self._next_storage_outbox_attempt = now + 5.0
+                        logger.warning("RabbitMQ-Ausgangsereignisse bleiben zur erneuten Zustellung offen: %s", error)
                 self.phase = "observing_plc"
                 try:
                     observations = await self._observe()

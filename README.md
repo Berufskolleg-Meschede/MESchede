@@ -36,21 +36,28 @@ The project follows a classic **three-tier architecture**, plus a direct OPC UA 
 └────────────────────────────────┘  └──────────────────────────┘
 ```
 
-**RabbitMQ** (running on the NAS) carries stock events from the ERP into the MES: a background consumer (`storage_consumer.py`) reads inventory snapshots/deltas from an inbound queue and keeps the local `Storage` table in sync. This is the path that is actually wired up and running today.
+**RabbitMQ** (running on the NAS) carries stock events in both directions. The inbound consumer reads ERP snapshots/deltas from a separately configured queue and is inactive until that queue is configured. The order worker publishes one outbound delta per good product unit confirmed at order completion: `+1` for production and `-1` for delivery.
 
 ```
 ┌─────────────────────┐        AMQP         ┌─────────────────────┐
 │   ERP / Producer(s) │ ──────────────────► │      RabbitMQ       │
-│                      │                     │  Inbound stock queue │
+│                      │                     │ Inbound stock queue  │
 └─────────────────────┘                     └──────────┬──────────┘
-                                                        │
-                                           ┌────────────▼────────────┐
+                                                        │ ERP → MES
+                                                        ▼
+                                           ┌─────────────────────────┐
                                            │   FastAPI Backend       │
                                            │  (storage_consumer)     │
                                            └─────────────────────────┘
+                                                        │ MES → ERP
+                                                        ▼
+┌─────────────────────┐        AMQP         ┌─────────────────────┐
+│   ERP / Consumer(s) │ ◄────────────────── │      RabbitMQ       │
+│                      │                     │  `storage` queue     │
+└─────────────────────┘                     └─────────────────────┘
 ```
 
-A matching outbound publisher (`app/clients/rabbitmq/base.py`, a `storage` queue) exists in the codebase but is **not currently called from anywhere in the running application** — treat it as a building block for a future outbound flow, not as live behavior.
+Outbound events are stored in a PostgreSQL outbox with the confirmed order result and retried until RabbitMQ confirms delivery. The AMQP `message_id` remains stable across retries; ERP consumers should deduplicate on that ID. The outbound body contains `product_id` and `quantity_delta`.
 
 Development Compose starts PostgreSQL and the backend; start the frontend separately. Production Compose uses the published images and configures the frontend proxy to the backend.
 
@@ -92,7 +99,7 @@ MESchede/
 │   │   ├── repositories/        # persistence for the order pipeline
 │   │   ├── services/            # business logic (dispatch, analytics, reviews, settings)
 │   │   ├── workers/             # background order worker + RabbitMQ consumer
-│   │   ├── clients/             # OPC UA client + PLC order gateway (live); RabbitMQ outbound publisher (currently unused)
+│   │   ├── clients/             # OPC UA client + PLC order gateway + RabbitMQ publisher
 │   │   └── db/                  # database connection and session management
 │   ├── alembic/                 # database migration scripts
 │   ├── tests/                   # pytest suite (unit + integration, simulated PLC)
@@ -158,7 +165,7 @@ All endpoints below are implemented by the routers under `backend/app/routers/`.
 
 ### External integration
 
-There is no REST API exposed to or consumed from the ERP system. The MES ↔ ERP integration is asynchronous via **RabbitMQ**: an inbound stock-events consumer is wired into the backend today (activated once `RABBITMQ_STORAGE_INBOUND_QUEUE` is configured); an outbound publisher class also exists in the code but isn't called from anywhere yet — see [RabbitMQ Integration](#rabbitmq-integration) below and the [Wiki](https://github.com/Berufskolleg-Meschede/MESchede/wiki) for the full contract.
+There is no REST API exposed to or consumed from the ERP system. The MES ↔ ERP integration is asynchronous via **RabbitMQ**: confirmed production and delivery results publish relative stock changes; inbound ERP stock events use a separate queue and remain inactive until its contract and name are configured. See [RabbitMQ Integration](#rabbitmq-integration) below and the [Wiki](https://github.com/Berufskolleg-Meschede/MESchede/wiki) for the full contract.
 
 ---
 
@@ -216,7 +223,7 @@ npm run dev
 ## RabbitMQ Integration
 
 ### Übersicht
-Das MES nutzt RabbitMQ als Message Broker für Lagerbestandsdaten. Aktuell **tatsächlich verdrahtet und aktiv** ist die eingehende Richtung: ein Hintergrund-Consumer (`app/workers/storage_consumer.py`) liest Bestandsmeldungen aus einer Eingangsqueue und schreibt sie in die lokale `Storage`-Tabelle (siehe „Bestandsmeldungen an das MES“ unten). Die unten gezeigte `RabbitMQClient`/`send_storage_message`-Klasse für die ausgehende Richtung (`app/clients/rabbitmq/base.py`) existiert im Code, wird aber **von keiner laufenden Stelle der Anwendung aufgerufen** — sie ist als Bausteine für eine künftige ausgehende Veröffentlichung von Lagermengen-Änderungen gedacht, nicht als aktuelles Verhalten.
+Das MES nutzt RabbitMQ für Lagerbewegungen in beide Richtungen. Der Auftragsworker veröffentlicht bestätigte Einzelbewegungen auf der dauerhaften Ausgangsqueue `storage`: jede erfolgreich produzierte Produkteinheit als `quantity_delta: 1`, jede erfolgreich ausgelieferte Produkteinheit als `quantity_delta: -1`. Fehlgeschlagene Produkte und lediglich geplante oder manuell geschätzte Mengen werden nicht veröffentlicht. Die Ereignisse werden zusammen mit dem bestätigten PLC-Ergebnis in einer Outbox gespeichert und nach Brokerbestätigung als gesendet markiert; bei Ausfall werden sie erneut versucht. Die eingehende Richtung bleibt davon getrennt und verwendet eine eigene, mit der Lager-/ERP-Gruppe abzustimmende Queue.
 
 RabbitMQ läuft als Docker-Container auf dem NAS und ist über folgende Ports erreichbar:
 
@@ -234,15 +241,9 @@ RABBITMQ_URL=amqp://<user>:<password>@<host>:<port>/
 
 Die echten Zugangsdaten sind nicht im Repository — bei einem Teammitglied oder dem NAS-Admin erfragen.
 
-### Nachrichten publishen
+### Automatische ausgehende Bestandsänderungen
 
-```python
-from app.clients.rabbitmq.base import send_storage_message
-
-send_storage_message(product_id=42, quantity_delta=-5)
-```
-
-Jede Nachricht hat folgendes Format:
+Der Auftragsworker veröffentlicht eine Nachricht je bestätigter guter Produkteinheit. Für ein ausgeliefertes Produkt hat der Nachrichtenkörper folgendes Format:
 ```json
 {
   "product_id": 42,
@@ -250,7 +251,11 @@ Jede Nachricht hat folgendes Format:
 }
 ```
 
-`quantity_delta` ist positiv beim Einlagern und negativ beim Auslagern.
+Bei Produktion ist `quantity_delta` `1`; bei Auslieferung ist es `-1`. Der AMQP-Header `message_id` enthält eine dauerhafte MES-Ereignis-ID. Die Outbox stellt nach Broker-Ausfällen erneut zu; Empfänger sollten deshalb `message_id` zur Deduplizierung verwenden.
+
+### Publisher manuell verwenden
+
+Für kontrollierte manuelle Aufrufe außerhalb des Auftragsworkers kann der Publisher direkt verwendet werden:
 
 ### Klasse direkt verwenden
 

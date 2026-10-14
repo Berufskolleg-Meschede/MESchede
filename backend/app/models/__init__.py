@@ -11,5 +11,6 @@ from .production_order import ProductionOrder
 from .delivery_order import DeliveryOrder
 from .storage import Storage
 from .storage import StorageEvent
+from .storage_outbox_event import StorageOutboxEvent
 from .settings import Settings
 from .production_run import ProductionRun

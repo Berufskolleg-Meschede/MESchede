@@ -3,6 +3,7 @@
 from app.domain.order_run import OrderConflict, RunPhase
 from app.domain.plc_snapshot import PlcSnapshot
 from app.models.mes_order import MesOrderRecord
+from app.models.storage_outbox_event import StorageOutboxEvent
 from app.repositories.order_repository import OrderRepository
 from app.settings import OrderSettings
 
@@ -28,7 +29,7 @@ class ProductResultService:
             self._observe_phase(run, snapshot)
             if snapshot.status == 5:
                 manual_conflict = self._observe_results(
-                    run, state, self.repository.load_units(session, run_id), snapshot
+                    run, state, self.repository.load_units(session, run_id), snapshot, order.order_type
                 )
                 if run.review_required and not manual_conflict:
                     run.review_required = False
@@ -65,7 +66,7 @@ class ProductResultService:
         if snapshot.status == 5 and run.phase in {RunPhase.START_PENDING.value, RunPhase.RUNNING.value}:
             self.repository.change_phase(run, RunPhase.COMPLETION_OBSERVED)
 
-    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot) -> bool:
+    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot, order_type: str) -> bool:
         """Übernimmt Endresultate; bestätigter Abschluss setzt unbekannte Einheiten auf erfolgreich."""
         observations = {}
         ambiguous_indices = set()
@@ -80,6 +81,7 @@ class ProductResultService:
             observations.pop(index, None)
         changed = False
         assumed = False
+        newly_good_units = []
         for unit in units:
             observation = observations.get(unit.queue_index)
             if observation is not None:
@@ -100,10 +102,27 @@ class ProductResultService:
                 raw_status, error_code = observation.raw_status, observation.error_code
             if unit.result is not None and result != unit.result:
                 raise OrderConflict("Ein bereits belegtes Produktresultat widerspricht der neuen Rückmeldung.")
+            previous_result = unit.result
             values = (result, raw_status, error_code)
             if (unit.result, unit.raw_status, unit.error_code) != values:
                 unit.result, unit.raw_status, unit.error_code = values
                 changed = True
+            if previous_result is None and result == "good":
+                newly_good_units.append(unit)
+
+        self._check_manual_totals(run, state, units)
+        manual_conflict = (
+            run.review_required
+            and run.review_reason == "Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung."
+        )
+        if not manual_conflict:
+            quantity_delta = 1 if order_type == "production" else -1
+            for unit in newly_good_units:
+                session.add(StorageOutboxEvent(
+                    event_id=f"mes-order:{run.id}:{unit.queue_index}",
+                    product_id=unit.product_id,
+                    quantity_delta=quantity_delta,
+                ))
         if units and not run.result_observed:
             run.result_observed = True
             changed = True
@@ -112,8 +131,7 @@ class ProductResultService:
             changed = True
         if changed:
             run.version += 1
-        self._check_manual_totals(run, state, units)
-        return run.review_required and run.review_reason == "Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung."
+        return manual_conflict
 
     def _check_manual_totals(self, run, state, units: list) -> None:
         """Erhält manuelle Bewertungen; spätere Widersprüche benötigen eine erneute Prüfung."""
