@@ -1,7 +1,17 @@
 from logging.config import fileConfig
+from pathlib import Path
+import sys
+
 from sqlalchemy import create_engine, pool
 from alembic import context
 from sqlmodel import SQLModel
+
+# Alembic is launched from its console script, so the backend project root is
+# not guaranteed to be on sys.path (locally or inside the Docker image).
+backend_root = str(Path(__file__).resolve().parents[1])
+if backend_root not in sys.path:
+    sys.path.insert(0, backend_root)
+
 from app.db.url import get_postgres_url
 
 # Alembic Config object
