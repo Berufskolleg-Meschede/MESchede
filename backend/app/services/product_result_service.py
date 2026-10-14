@@ -27,8 +27,10 @@ class ProductResultService:
                 raise OrderConflict("Der PLC-Laufstatus ist nicht zugeordnet. Bitte den Lauf prüfen.")
             self._observe_phase(run, snapshot)
             if snapshot.status == 5:
-                self._observe_results(run, state, self.repository.load_units(session, run_id), snapshot)
-                if run.review_required:
+                manual_conflict = self._observe_results(
+                    run, state, self.repository.load_units(session, run_id), snapshot
+                )
+                if run.review_required and not manual_conflict:
                     run.review_required = False
                     run.review_reason = None
                     run.phase = RunPhase.COMPLETION_OBSERVED.value
@@ -63,7 +65,7 @@ class ProductResultService:
         if snapshot.status == 5 and run.phase in {RunPhase.START_PENDING.value, RunPhase.RUNNING.value}:
             self.repository.change_phase(run, RunPhase.COMPLETION_OBSERVED)
 
-    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot) -> None:
+    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot) -> bool:
         """Übernimmt Endresultate; bestätigter Abschluss setzt unbekannte Einheiten auf erfolgreich."""
         observations = {}
         ambiguous_indices = set()
@@ -111,6 +113,7 @@ class ProductResultService:
         if changed:
             run.version += 1
         self._check_manual_totals(run, state, units)
+        return run.review_required and run.review_reason == "Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung."
 
     def _check_manual_totals(self, run, state, units: list) -> None:
         """Erhält manuelle Bewertungen; spätere Widersprüche benötigen eine erneute Prüfung."""

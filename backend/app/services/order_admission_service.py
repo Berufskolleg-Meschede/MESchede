@@ -15,8 +15,7 @@ class OrderAdmissionService:
     def accept(self, kind: OrderType, payload: OrderPayload) -> dict:
         """Liefert nach Commit eine Referenz, ohne einen PLC-Start zu behaupten."""
         stored = self.repository.admit(kind, payload)
-        snapshot = self.repository.snapshot()
-        queued = sum(item.order.order_type == kind.value and item.run.phase == "queued" for item in snapshot.orders)
+        queued = self.repository.queue_size(kind)
         return {
             "queued": stored.run.phase == "queued",
             "order_id": stored.order.order_id,

@@ -5,6 +5,7 @@ import logging
 from dataclasses import replace
 
 from opcua import ua
+from sqlalchemy.exc import SQLAlchemyError
 from app.clients.plc_order_gateway import PlcGateway
 from app.domain.order_run import OrderConflict, OrderType
 from app.repositories.order_repository import OrderRepository
@@ -77,15 +78,18 @@ class OrderWorkerHost:
                     continue
                 await self.leadership.assert_owned()
                 self.phase = "observing_plc"
-                observations = await self._observe()
-                if self.recovering:
-                    await self._recover(observations)
-                    self.recovering = False
-                self.phase = "dispatching"
                 try:
+                    observations = await self._observe()
+                    if self.recovering:
+                        await self._recover(observations)
+                        self.recovering = False
+                    self.phase = "dispatching"
                     await self.dispatch.tick(observations)
                 except (OrderConflict, ValueError, OSError, ua.UaError) as error:
                     await self._fail_active(error)
+                except SQLAlchemyError as error:
+                    self.last_error = str(error)
+                    logger.warning("Datenbank vorübergehend nicht verfügbar; der Worker versucht es erneut.", exc_info=error)
                 self.phase = "waiting_for_poll"
                 await asyncio.sleep(self.settings.poll_interval_s)
         finally:
@@ -113,21 +117,22 @@ class OrderWorkerHost:
                     await reconnect()
                 except (OSError, ua.UaError):
                     logger.warning("Die PLC-Verbindung konnte nicht sauber getrennt werden.")
+        else:
+            await asyncio.to_thread(self.repository.block, None)
         return observations
 
     async def _recover(self, observations: dict) -> None:
         """Gleicht die persistierte Reservierung vor einer weiteren Übergabe ab."""
-        snapshot = await asyncio.to_thread(self.repository.snapshot)
-        active = next((item for item in snapshot.orders if item.run.id == snapshot.dispatch.active_run_id), None)
+        active, _ = await asyncio.to_thread(self.repository.active_order)
         if active is not None:
             await asyncio.to_thread(self.recovery.reconcile, active, observations)
 
     async def _fail_active(self, error: Exception) -> None:
         """Sichert Ausführungsunsicherheit, statt einen Fehlerauftrag aus der Queue zu verlieren."""
         self.last_error = str(error)
-        snapshot = await asyncio.to_thread(self.repository.snapshot)
-        if snapshot.dispatch.active_run_id:
-            await asyncio.to_thread(self.repository.require_review, snapshot.dispatch.active_run_id, str(error))
+        _, state = await asyncio.to_thread(self.repository.active_order)
+        if state.active_run_id:
+            await asyncio.to_thread(self.repository.require_review, state.active_run_id, str(error))
         else:
             await asyncio.to_thread(self.repository.block, str(error))
         logger.warning("Die Auftragsverarbeitung benötigt einen Abgleich: %s", error)
@@ -146,15 +151,9 @@ class OrderWorkerHost:
 
     def diagnostics(self, kind: OrderType) -> dict:
         """Liefert Workerinformationen ohne Verbindung oder Schreiben zur PLC."""
-        snapshot = self.repository.snapshot()
-        orders = [item for item in snapshot.orders if item.order.order_type == kind.value]
-        active = next((item for item in orders if item.run.id == snapshot.dispatch.active_run_id), None)
-        completed = [item for item in orders if item.run.phase == "completed"]
+        stored = self.repository.diagnostics(kind)
         return {
             "worker_running": self.running, "worker_phase": self.phase,
-            "queue_size": sum(item.run.phase == "queued" for item in orders),
-            "current_order_id": active.order.order_id if active else None,
-            "last_order_id": orders[-1].order.order_id if orders else None,
-            "last_completed_order_id": completed[-1].order.order_id if completed else None,
+            **stored,
             "last_error": self.last_error,
         }

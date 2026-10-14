@@ -62,7 +62,7 @@ export interface AnalyticsRun {
   processed_quantity: number | null
   good_quantity: number | null
   defective_quantity: number | null
-  status: 'queued' | 'running' | 'completed' | 'unknown'
+  status: 'queued' | 'running' | 'completed' | 'unknown' | 'review_required'
   started_at: string | null
   ended_at: string | null
   created_at: string

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Engine, text
+from sqlalchemy import Engine, String, cast, func, or_, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlmodel import Session, select
 
@@ -141,12 +141,171 @@ class OrderRepository:
             pairs = session.exec(select(MesOrderRecord, OrderRunRecord).join(
                 OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
             ).order_by(MesOrderRecord.accepted_sequence)).all()
-            orders = tuple(StoredOrder(order, run, tuple(self.load_units(session, run.id))) for order, run in pairs)
+            run_ids = [run.id for _, run in pairs]
+            units_by_run: dict[str, list[ProductUnitRecord]] = {run_id: [] for run_id in run_ids}
+            if run_ids:
+                for unit in session.exec(select(ProductUnitRecord).where(
+                    ProductUnitRecord.run_id.in_(run_ids),
+                ).order_by(ProductUnitRecord.run_id, ProductUnitRecord.queue_index)).all():
+                    units_by_run[unit.run_id].append(unit)
+            orders = tuple(StoredOrder(order, run, tuple(units_by_run[run.id])) for order, run in pairs)
             sources = tuple(session.exec(select(PlcSourceStateRecord)).all())
             state = session.get(DispatchStateRecord, 1)
             if state is None:
                 raise RuntimeError("Auftragsdaten sind nicht initialisiert. Bitte Migration und Workerstart prüfen.")
             return OrderSnapshot(orders, sources, state)
+
+    def active_order(self) -> tuple[StoredOrder | None, DispatchStateRecord]:
+        """Liest ausschließlich die aktive Reservierung und ihre Einheiten für den Pollzyklus."""
+        with self.transaction() as session:
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            state = session.get(DispatchStateRecord, 1)
+            if state is None:
+                raise RuntimeError("Auftragsdaten sind nicht initialisiert. Bitte Migration und Workerstart prüfen.")
+            if not state.active_run_id:
+                return None, state
+            pair = session.exec(select(MesOrderRecord, OrderRunRecord).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(OrderRunRecord.id == state.active_run_id)).first()
+            if pair is None:
+                return None, state
+            order, run = pair
+            stored = StoredOrder(order, run, tuple(self.load_units(session, run.id)))
+            return stored, state
+
+    def order_detail(self, kind: OrderType, order_id: str):
+        """Lädt genau einen Auftragslauf samt Einheiten und passendem PLC-Quellenstatus."""
+        with self.transaction() as session:
+            pair = session.exec(select(MesOrderRecord, OrderRunRecord).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value, MesOrderRecord.order_id == order_id)).first()
+            if pair is None:
+                return None
+            order, run = pair
+            units = tuple(self.load_units(session, run.id))
+            source = session.get(PlcSourceStateRecord, kind.value)
+            if source is None:
+                raise RuntimeError("Die PLC-Quelle ist nicht initialisiert.")
+            return StoredOrder(order, run, units), source
+
+    def queue_size(self, kind: OrderType) -> int:
+        """Zählt wartende Aufträge eines Typs direkt in der Datenbank."""
+        with Session(self.engine) as session:
+            return session.exec(select(func.count()).select_from(OrderRunRecord).join(
+                MesOrderRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value,
+                    OrderRunRecord.phase == RunPhase.QUEUED.value)).one()
+
+    def diagnostics(self, kind: OrderType) -> dict:
+        """Liefert Queue-Kennzahlen ohne Laufhistorie oder Produkteinheiten zu laden."""
+        with Session(self.engine) as session:
+            state = session.get(DispatchStateRecord, 1)
+            active_id = None
+            if state is not None and state.active_run_id:
+                active_id = session.exec(select(MesOrderRecord.order_id).join(
+                    OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+                ).where(OrderRunRecord.id == state.active_run_id,
+                        MesOrderRecord.order_type == kind.value)).first()
+            queued = session.exec(select(func.count()).select_from(OrderRunRecord).join(
+                MesOrderRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value,
+                    OrderRunRecord.phase == RunPhase.QUEUED.value)).one()
+            last_id = session.exec(select(MesOrderRecord.order_id).where(
+                MesOrderRecord.order_type == kind.value,
+            ).order_by(MesOrderRecord.accepted_sequence.desc()).limit(1)).first()
+            completed_id = session.exec(select(MesOrderRecord.order_id).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value,
+                    OrderRunRecord.phase == RunPhase.COMPLETED.value).order_by(
+                        MesOrderRecord.accepted_sequence.desc()).limit(1)).first()
+            return {"queue_size": queued, "current_order_id": active_id,
+                    "last_order_id": last_id, "last_completed_order_id": completed_id}
+
+    def page_snapshot(self, kind: OrderType, offset: int, limit: int, search: str, status: str | None):
+        """Paginiert Auftragsköpfe in SQL und lädt Einheiten nur für sichtbare/relevante Läufe."""
+        phases = {
+            "pending": [RunPhase.QUEUED.value],
+            "in_progress": [RunPhase.PREPARING.value, RunPhase.START_PENDING.value, RunPhase.RUNNING.value],
+            "completed": [RunPhase.COMPLETED.value, RunPhase.COMPLETION_OBSERVED.value, RunPhase.AWAITING_RESET.value],
+            "error": [RunPhase.INTERRUPTED.value],
+            "review_required": [RunPhase.REVIEW_REQUIRED.value],
+        }
+        with self.transaction() as session:
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            base = select(MesOrderRecord, OrderRunRecord).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value)
+            total = session.exec(select(func.count()).select_from(base.subquery())).one()
+            query = base
+            normalized = search.strip().casefold()
+            if normalized:
+                pattern = f"%{normalized}%"
+                unit_match = select(ProductUnitRecord.id).where(
+                    ProductUnitRecord.run_id == OrderRunRecord.id,
+                    or_(func.lower(ProductUnitRecord.product_text).like(pattern),
+                        cast(ProductUnitRecord.product_id, String).like(pattern)),
+                ).exists()
+                query = query.where(or_(func.lower(MesOrderRecord.order_id).like(pattern),
+                                        cast(MesOrderRecord.plc_order_number, String).like(pattern), unit_match))
+            if status is not None:
+                query = query.where(OrderRunRecord.phase.in_(phases[status]))
+            filtered_total = session.exec(select(func.count()).select_from(query.subquery())).one()
+            selected = session.exec(query.order_by(MesOrderRecord.accepted_sequence).offset(offset).limit(limit)).all()
+            state = session.get(DispatchStateRecord, 1)
+            if state is None:
+                raise RuntimeError("Auftragsdaten sind nicht initialisiert. Bitte Migration und Workerstart prüfen.")
+            summary_rows = session.exec(select(OrderRunRecord.phase, func.count()).join(
+                MesOrderRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(MesOrderRecord.order_type == kind.value).group_by(OrderRunRecord.phase)).all()
+            summary = {phase: count for phase, count in summary_rows}
+            context_pairs = session.exec(select(MesOrderRecord, OrderRunRecord).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(or_(OrderRunRecord.review_required.is_(True),
+                        OrderRunRecord.phase == RunPhase.QUEUED.value,
+                        OrderRunRecord.id == state.active_run_id)).order_by(MesOrderRecord.accepted_sequence)).all()
+            all_pairs = {run.id: (order, run) for order, run in (*selected, *context_pairs)}
+            unit_run_ids = {run.id for _, run in selected}
+            unit_run_ids.update(run.id for _, run in context_pairs if run.review_required or run.id == state.active_run_id)
+            units_by_run: dict[str, list[ProductUnitRecord]] = {run_id: [] for run_id in unit_run_ids}
+            if unit_run_ids:
+                units = session.exec(select(ProductUnitRecord).where(
+                    ProductUnitRecord.run_id.in_(unit_run_ids),
+                ).order_by(ProductUnitRecord.run_id, ProductUnitRecord.queue_index)).all()
+                for unit in units:
+                    units_by_run[unit.run_id].append(unit)
+            orders = tuple(StoredOrder(order, run, tuple(units_by_run.get(run.id, ())))
+                           for order, run in sorted(all_pairs.values(), key=lambda pair: pair[0].accepted_sequence))
+            sources = tuple(session.exec(select(PlcSourceStateRecord)).all())
+            return OrderSnapshot(orders, sources, state), [run.id for _, run in selected], total, filtered_total, summary
+
+    def overview_snapshot(self):
+        """Lädt nur aktive, wartende und zu prüfende Aufträge plus aggregierte Statuszahlen."""
+        with self.transaction() as session:
+            session.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY"))
+            state = session.get(DispatchStateRecord, 1)
+            if state is None:
+                raise RuntimeError("Auftragsdaten sind nicht initialisiert. Bitte Migration und Workerstart prüfen.")
+            pairs = session.exec(select(MesOrderRecord, OrderRunRecord).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).where(or_(OrderRunRecord.review_required.is_(True),
+                        OrderRunRecord.phase == RunPhase.QUEUED.value,
+                        OrderRunRecord.id == state.active_run_id)).order_by(MesOrderRecord.accepted_sequence)).all()
+            unit_run_ids = {run.id for _, run in pairs if run.review_required or run.id == state.active_run_id}
+            units_by_run: dict[str, list[ProductUnitRecord]] = {run_id: [] for run_id in unit_run_ids}
+            if unit_run_ids:
+                for unit in session.exec(select(ProductUnitRecord).where(
+                    ProductUnitRecord.run_id.in_(unit_run_ids),
+                ).order_by(ProductUnitRecord.run_id, ProductUnitRecord.queue_index)).all():
+                    units_by_run[unit.run_id].append(unit)
+            orders = tuple(StoredOrder(order, run, tuple(units_by_run.get(run.id, ()))) for order, run in pairs)
+            sources = tuple(session.exec(select(PlcSourceStateRecord)).all())
+            summary_rows = session.exec(select(MesOrderRecord.order_type, OrderRunRecord.phase, func.count()).join(
+                OrderRunRecord, MesOrderRecord.id == OrderRunRecord.order_ref,
+            ).group_by(MesOrderRecord.order_type, OrderRunRecord.phase)).all()
+            summaries: dict[str, dict[str, int]] = {}
+            for kind, phase, count in summary_rows:
+                summaries.setdefault(kind, {})[phase] = count
+            return OrderSnapshot(orders, sources, state), summaries
 
     def reserve_next(self) -> StoredOrder | None:
         """Reserviert atomar genau den ältesten wartenden Auftrag beider Arten."""

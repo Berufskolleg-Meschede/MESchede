@@ -8,6 +8,7 @@ import pytest
 
 from app.clients.plc_order_gateway import PlcOrderGateway
 from app.domain.order_run import OrderType
+from app.models.settings import Settings
 from tests.test_opc_ua_client import _make_client, _make_order_tree
 
 
@@ -72,6 +73,24 @@ def test_failed_count_readback_never_sends_reset_command(gateway_tree):
     with pytest.raises(ValueError,match='Produktanzahl'):
         asyncio.run(gateway.acknowledge(OrderType.PRODUCTION,1))
     header[-1].set_data_value.assert_not_called()
+
+
+def test_configured_root_names_are_refreshed_without_reconnecting():
+    configured = Settings(opcua_node_production_order="ProductionAtStartup")
+    gateway = PlcOrderGateway('unused-test-url', settings_provider=lambda: configured)
+    client = _make_client()
+    database = object()
+    gateway.client = client
+    gateway.connected = True
+    client._find_node_by_name_sync = MagicMock(return_value=database)
+    client._get_child = MagicMock(side_effect=lambda parent, name: (parent, name))
+
+    assert gateway._root(OrderType.PRODUCTION) == (database, "ProductionAtStartup")
+    configured.opcua_node_production_order = "ProductionAfterSettingsChange"
+    assert gateway._root(OrderType.PRODUCTION) == (database, "ProductionAfterSettingsChange")
+    assert client.client.connect.call_count == 0
+    assert client._find_node_by_name_sync.call_count == 2
+    asyncio.run(gateway.close())
 
 
 def test_cancel_waits_for_inflight_io_before_closing_gateway():

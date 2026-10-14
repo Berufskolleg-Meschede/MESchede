@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.domain.order_run import OrderType, ReviewOutcome, RunPhase
 from app.models.mes_auftrag import MESAuftrag
@@ -18,6 +18,12 @@ class OrderPayload(BaseModel):
 
     order_id: str = Field(min_length=1, max_length=200, pattern=r".*\S.*")
     mes_auftrag: MESAuftrag
+
+    @field_validator("order_id")
+    @classmethod
+    def normalize_order_id(cls, value: str) -> str:
+        """Verwendet für Idempotenz und PLC-Zuordnung eine kanonische Auftrags-ID."""
+        return value.strip()
 
 
 class SourceStatus(BaseModel):

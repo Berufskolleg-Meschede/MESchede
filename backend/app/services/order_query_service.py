@@ -7,7 +7,7 @@ from app.models.order_dto import (
     DispatchView, OrderPageView, OrderSummary, OrderView, OverviewView, ProductUnitView, SourceStatus,
 )
 from app.models.plc_source_state_record import PlcSourceStateRecord
-from app.repositories.order_repository import OrderRepository, OrderSnapshot, StoredOrder
+from app.repositories.order_repository import OrderRepository, StoredOrder
 from app.settings import OrderSettings
 
 
@@ -49,12 +49,15 @@ class OrderQueryService:
         order, run = stored.order, stored.run
         good, failed, origin = self._quantities(stored)
         processed = good + failed if good is not None and failed is not None else None
+        planned_quantity = len(stored.units)
+        if not stored.units:
+            planned_quantity = len(order.payload.get("inhalt", {}).get("Produktqueue", []))
         return OrderView(
             order_id=order.order_id, order_type=order.order_type, order_ref=order.id,
             run_id=run.id, plc_order_number=order.plc_order_number,
             accepted_sequence=order.accepted_sequence, accepted_at=order.accepted_at,
             status=OrderRun(RunPhase(run.phase)).status, run_phase=run.phase,
-            planned_quantity=len(stored.units), processed_quantity=processed,
+            planned_quantity=planned_quantity, processed_quantity=processed,
             good_quantity=good, error_quantity=failed,
             result_complete=bool(stored.units) and all(unit.result is not None for unit in stored.units),
             quantity_source=origin, review_required=run.review_required, review_reason=run.review_reason,
@@ -74,26 +77,38 @@ class OrderQueryService:
             for status in ("pending", "in_progress", "completed", "error", "review_required")
         })
 
-    def _snapshot_views(self) -> tuple[OrderSnapshot, dict[OrderType, SourceStatus], list[OrderView]]:
-        """Liest einmal und ordnet Quellen sowie globale Positionen allen Bereichen zu."""
-        snapshot = self.repository.snapshot()
-        sources = {OrderType(item.order_type): self._source(item) for item in snapshot.sources}
-        waiting_ids = [item.run.id for item in snapshot.orders if item.run.phase == RunPhase.QUEUED.value]
-        positions = {run_id: index + 1 for index, run_id in enumerate(waiting_ids)}
-        views = [self._view(item, sources[OrderType(item.order.order_type)], positions.get(item.run.id)) for item in snapshot.orders]
-        return snapshot, sources, views
+    def _summary_from_counts(self, counts: dict[str, int]) -> OrderSummary:
+        """Mappt persistierte Laufphasen auf Summen, ohne Auftragsdetails zu laden."""
+        phases = {
+            "pending": [RunPhase.QUEUED.value],
+            "in_progress": [RunPhase.PREPARING.value, RunPhase.START_PENDING.value, RunPhase.RUNNING.value],
+            "completed": [RunPhase.COMPLETED.value, RunPhase.COMPLETION_OBSERVED.value, RunPhase.AWAITING_RESET.value],
+            "error": [RunPhase.INTERRUPTED.value],
+            "review_required": [RunPhase.REVIEW_REQUIRED.value],
+        }
+        totals = {name: sum(counts.get(phase, 0) for phase in names) for name, names in phases.items()}
+        return OrderSummary(total=sum(totals.values()), **totals)
 
     def overview(self, worker_running: bool) -> OverviewView:
         """Kombiniert beide Bereiche aus einer einzigen Datenbankbeobachtung."""
-        snapshot, sources, views = self._snapshot_views()
-        production = [order for order in views if order.order_type == OrderType.PRODUCTION]
-        delivery = [order for order in views if order.order_type == OrderType.DELIVERY]
+        snapshot, counts = self.repository.overview_snapshot()
+        sources = {OrderType(item.order_type): self._source(item) for item in snapshot.sources}
+        waiting_rows = [item for item in snapshot.orders if item.run.phase == RunPhase.QUEUED.value]
+        positions = {item.run.id: index + 1 for index, item in enumerate(waiting_rows)}
+        views = [self._view(item, sources[OrderType(item.order.order_type)], positions.get(item.run.id))
+                 for item in snapshot.orders]
         reviews = [order for order in views if order.review_required]
+        combined: dict[str, int] = {}
+        for summary in counts.values():
+            for phase, count in summary.items():
+                combined[phase] = combined.get(phase, 0) + count
         reason = snapshot.dispatch.blocked_reason
         if not worker_running:
             reason = "Der Auftragsworker ist nicht gestartet."
         return OverviewView(
-            production=self._summary(production), delivery=self._summary(delivery), combined=self._summary(views),
+            production=self._summary_from_counts(counts.get(OrderType.PRODUCTION.value, {})),
+            delivery=self._summary_from_counts(counts.get(OrderType.DELIVERY.value, {})),
+            combined=self._summary_from_counts(combined),
             dispatch=DispatchView(
                 blocked=bool(reason or reviews or snapshot.dispatch.active_run_id), reason=reason,
                 active_run_id=snapshot.dispatch.active_run_id, worker_running=worker_running,
@@ -107,21 +122,34 @@ class OrderQueryService:
     def page(self, kind: OrderType, worker_running: bool, offset: int = 0, limit: int = 50,
              search: str = "", status: str | None = None) -> OrderPageView:
         """Liefert paginierte Aufträge mit ungefilterter Bereichszusammenfassung."""
-        snapshot, sources, all_views = self._snapshot_views()
-        views = [item for item in all_views if item.order_type == kind]
-        query = search.strip().casefold()
-        filtered = [item for item in views if (status is None or item.status == status) and (
-            not query or query in " ".join([
-                item.order_id, item.order_id.zfill(4), str(item.plc_order_number),
-                *[unit.product_text for unit in item.units], *[str(unit.product_id) for unit in item.units],
-            ]).casefold()
-        )]
+        snapshot, selected_ids, total, filtered_total, counts = self.repository.page_snapshot(
+            kind, offset, limit, search, status,
+        )
+        sources = {OrderType(item.order_type): self._source(item) for item in snapshot.sources}
+        waiting = [item for item in snapshot.orders if item.run.phase == RunPhase.QUEUED.value]
+        positions = {item.run.id: index + 1 for index, item in enumerate(waiting)}
+        views_by_id = {
+            item.run.id: self._view(item, sources[OrderType(item.order.order_type)], positions.get(item.run.id))
+            for item in snapshot.orders
+        }
+        views = [views_by_id[run_id] for run_id in selected_ids]
+        all_views = list(views_by_id.values())
+        total_summary = OrderSummary(total=total, **{
+            name: sum(counts.get(phase, 0) for phase in phase_names)
+            for name, phase_names in {
+                "pending": [RunPhase.QUEUED.value],
+                "in_progress": [RunPhase.PREPARING.value, RunPhase.START_PENDING.value, RunPhase.RUNNING.value],
+                "completed": [RunPhase.COMPLETED.value, RunPhase.COMPLETION_OBSERVED.value, RunPhase.AWAITING_RESET.value],
+                "error": [RunPhase.INTERRUPTED.value],
+                "review_required": [RunPhase.REVIEW_REQUIRED.value],
+            }.items()
+        })
         reason = snapshot.dispatch.blocked_reason if worker_running else "Der Auftragsworker ist nicht gestartet."
         return OrderPageView(
-            orders=filtered[offset:offset + limit], total=len(views), filtered_total=len(filtered), offset=offset, limit=limit,
-            active=[item for item in views if item.run_id == snapshot.dispatch.active_run_id],
-            waiting=[item for item in views if item.run_phase == RunPhase.QUEUED],
-            reviews=[item for item in all_views if item.review_required], summary=self._summary(views),
+            orders=views, total=total, filtered_total=filtered_total, offset=offset, limit=limit,
+            active=[item for item in all_views if item.run_id == snapshot.dispatch.active_run_id],
+            waiting=[item for item in all_views if item.run_phase == RunPhase.QUEUED],
+            reviews=[item for item in all_views if item.review_required], summary=total_summary,
             dispatch=DispatchView(blocked=bool(reason or snapshot.dispatch.active_run_id), reason=reason,
                                   active_run_id=snapshot.dispatch.active_run_id, worker_running=worker_running),
             source=sources[kind], refresh_interval_s=self.settings.refresh_interval_s,
@@ -130,8 +158,8 @@ class OrderQueryService:
 
     def detail(self, kind: OrderType, order_id: str) -> OrderView:
         """Sucht eine fachliche String-ID ausschließlich innerhalb ihres Auftragstyps."""
-        page = self.page(kind, True, limit=2 ** 31 - 1)
-        for order in page.orders:
-            if order.order_id == order_id:
-                return order
-        raise LookupError("Der Auftrag ist nicht vorhanden.")
+        item = self.repository.order_detail(kind, order_id)
+        if item is None:
+            raise LookupError("Der Auftrag ist nicht vorhanden.")
+        stored, source = item
+        return self._view(stored, self._source(source), None)

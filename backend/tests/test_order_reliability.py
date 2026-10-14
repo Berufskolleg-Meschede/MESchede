@@ -110,6 +110,20 @@ def test_status_zero_with_nonzero_count_is_not_ready(order_repository, order_pay
     assert gateway.events == []
 
 
+def test_one_missing_plc_observation_does_not_make_active_run_review_required(order_repository, order_payload):
+    stored = running_order(order_repository, order_payload())
+    gateway = SimulatedGateway()
+    gateway.snapshots.pop(OrderType.PRODUCTION)
+
+    asyncio.run(OrderDispatchService(order_repository, gateway, SETTINGS, FakeLeadership()).tick(gateway.snapshots))
+
+    current = order_repository.snapshot().orders[0]
+    assert current.run.id == stored.run.id
+    assert not current.run.review_required
+    assert current.run.phase == RunPhase.START_PENDING.value
+    assert gateway.events == []
+
+
 def test_only_one_worker_leader_can_write_until_connection_released(order_engine):
     async def scenario():
         """Hält zwei unabhängige Führungssessions auf demselben Schema."""

@@ -25,8 +25,7 @@ class OrderDispatchService:
 
     async def tick(self, observations: dict[OrderType, PlcSnapshot]) -> None:
         """Verarbeitet einen Beobachtungszyklus ohne parallele Auftragsvergabe."""
-        snapshot = await asyncio.to_thread(self.repository.snapshot)
-        active = next((item for item in snapshot.orders if item.run.id == snapshot.dispatch.active_run_id), None)
+        active, _ = await asyncio.to_thread(self.repository.active_order)
         if active is not None:
             await self._continue(active, observations)
             return
@@ -77,7 +76,7 @@ class OrderDispatchService:
             if phase in {RunPhase.COMPLETION_OBSERVED, RunPhase.AWAITING_RESET} or stored.run.ended_at is not None:
                 await asyncio.to_thread(self.repository.block, "Der Abschluss ist gespeichert; warte auf PLC-Rückmeldung für den Reset.")
                 return
-            await asyncio.to_thread(self.repository.require_review, stored.run.id, "Die PLC-Rückmeldung ist nicht verfügbar.")
+            await self._check_timeout(stored)
             return
         if not stored.run.review_required and phase == RunPhase.AWAITING_RESET:
             await self._continue_reset(stored, observation)

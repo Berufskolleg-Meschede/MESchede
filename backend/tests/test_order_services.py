@@ -57,6 +57,23 @@ def test_completed_order_assumes_success_when_result_codes_are_unmapped(order_re
     assert view.quantity_source == "completion"
 
 
+def test_completion_keeps_review_when_plc_totals_contradict_manual_review(order_repository, order_payload):
+    stored = running_order(order_repository, order_payload())
+    order_repository.require_review(stored.run.id, "Start nicht eindeutig")
+    before = order_repository.snapshot().orders[0]
+    RunReviewService(order_repository).review(stored.run.id, ReviewRequest(
+        request_id=uuid4(), expected_version=before.run.version, outcome="completed",
+        good_quantity=2, error_quantity=0,
+    ))
+    settings = OrderSettings(contract_verified=True, product_results={11: "good", 12: "failed"})
+    service = ProductResultService(order_repository, settings)
+
+    assert not service.observe(stored.run.id, finished_snapshot(order_repository))
+    current = order_repository.snapshot().orders[0]
+    assert current.run.review_required
+    assert current.run.review_reason == "Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung."
+
+
 def test_foreign_order_does_not_change_product_results(order_repository, order_payload):
     stored = running_order(order_repository, order_payload())
     service = ProductResultService(order_repository, OrderSettings(contract_verified=True, product_results={11: "good"}))
@@ -129,3 +146,11 @@ def test_missing_and_stale_sources_are_not_reported_as_fresh(order_repository):
     assert query.overview(True).sources[OrderType.PRODUCTION].freshness == "unknown"
     order_repository.source_success(OrderType.PRODUCTION, order_repository.clock() - timedelta(seconds=11))
     assert query.overview(True).sources[OrderType.PRODUCTION].freshness == "stale"
+
+
+def test_order_id_is_trimmed_before_admission(order_repository, order_payload):
+    first = order_repository.admit(OrderType.PRODUCTION, order_payload(order_id="  canonical-id  "))
+    repeated = order_repository.admit(OrderType.PRODUCTION, order_payload(order_id="canonical-id"))
+
+    assert first.order.id == repeated.order.id
+    assert repeated.order.order_id == "canonical-id"
