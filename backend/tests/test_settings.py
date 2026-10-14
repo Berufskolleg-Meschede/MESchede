@@ -243,7 +243,7 @@ def test_workers_refresh_configured_target_per_order_and_pin_it_during_reconnect
         monkeypatch.setattr(module, "_get_root_node", AsyncMock(side_effect=resolve))
         dispatched = []
 
-        async def execute(session, order, send, diagnostics, logger, kind):
+        async def execute(session, order, send, diagnostics, logger, kind, on_started=None, on_completed=None):
             expected_node = f"CustomNode{order.order_id}"
             assert session.root == expected_node
             if reconnect:

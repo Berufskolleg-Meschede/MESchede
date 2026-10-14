@@ -51,7 +51,7 @@ def accept_order(payload: DeliveryOrderPayload) -> bool:
     """Enqueue once per process; never silently replay an identical order ID."""
     existing = _accepted_orders.get(payload.order_id)
     if existing is not None:
-        if existing != payload:
+        if existing.model_dump() != payload.model_dump():
             raise ValueError("order_id already used with a different payload")
         return False
     delivery_queue.put_nowait(payload)

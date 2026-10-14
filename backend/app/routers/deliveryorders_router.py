@@ -28,7 +28,7 @@ def get_deliveryorder(deliveryorder_id: str):
 async def post_deliveryorder(payload: DeliveryOrderPayload):
     existing = delivery_queue.get_accepted_order(payload.order_id)
     if existing is not None:
-        if existing != payload:
+        if existing.model_dump() != payload.model_dump():
             raise HTTPException(status_code=409, detail="order_id already used with a different payload")
         return {"queued": False, "duplicate": True, "order_id": payload.order_id,
                 "queue_size": delivery_queue.delivery_queue.qsize()}
