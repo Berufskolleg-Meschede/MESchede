@@ -53,6 +53,12 @@ Diese Dokumente werden bei jeder Bearbeitung berücksichtigt:
 - Zusätzliche erklärende Code-Kommentare werden nur bei Bugfixes ergänzt und dokumentieren den Grund für den Fix.
 - Sobald Code und Spec nachweislich übereinstimmen, wird der Spec-State in derselben Session auf `Implemented` gesetzt.
 
+## Dokumentation
+
+- Ändert eine Spec/ein Commit für Außenstehende relevantes Verhalten (API-Vertrag, Datenmodell, Konfiguration, Deployment), werden `README.md` und die betroffenen Seiten im GitHub-Wiki im selben Zug aktualisiert.
+- Das erfolgt als Teil von „Spec und Implementierung abgleichen“, nicht als separater Prozess; der Spec-State wird erst auf `Implemented` gesetzt, wenn auch README/Wiki dem neuen Verhalten entsprechen.
+- Rein interne Refactorings ohne sichtbare Verhaltensänderung erfordern keine Doku-Anpassung.
+
 ## Commits
 
 - Ist eine Spec fertig umgesetzt (Spec-State auf `Implemented` gesetzt, Code und Spec stimmen nachweislich überein), wird direkt ein Commit erstellt, auch ohne gesonderten Auftrag für diesen einzelnen Commit.
