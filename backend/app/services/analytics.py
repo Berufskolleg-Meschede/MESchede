@@ -152,11 +152,12 @@ def list_runs(
         )
         if order_type is not None:
             current_statement = current_statement.where(MesOrderRecord.order_type == order_type)
+        observed_day = func.coalesce(OrderRunRecord.started_at, MesOrderRecord.accepted_at)
         if from_date is not None:
-            current_statement = current_statement.where(MesOrderRecord.accepted_at >= datetime.combine(from_date, time.min, tzinfo=timezone.utc))
+            current_statement = current_statement.where(observed_day >= datetime.combine(from_date, time.min, tzinfo=timezone.utc))
         if to_date is not None:
-            current_statement = current_statement.where(MesOrderRecord.accepted_at < datetime.combine(date.fromordinal(to_date.toordinal() + 1), time.min, tzinfo=timezone.utc))
-        current_statement = current_statement.group_by(MesOrderRecord.id, OrderRunRecord.id).order_by(MesOrderRecord.accepted_at.desc())
+            current_statement = current_statement.where(observed_day < datetime.combine(date.fromordinal(to_date.toordinal() + 1), time.min, tzinfo=timezone.utc))
+        current_statement = current_statement.group_by(MesOrderRecord.id, OrderRunRecord.id).order_by(observed_day.desc())
         current = session.execute(current_statement).all()
         rows = []
         current_keys = {(order.order_type, order.order_id) for order, *_ in current}
@@ -167,7 +168,12 @@ def list_runs(
                 run.processed_quantity = run.good_quantity + run.defective_quantity
             rows.append(run.model_dump())
         for order, run, planned, good, failed in current:
-            status = "review_required" if run.review_required else "completed" if run.phase in {"completed", "completion_observed", "awaiting_reset"} else "running" if run.started_at else "queued"
+            status = (
+                "review_required" if run.review_required else
+                "unknown" if run.phase == "interrupted" else
+                "completed" if run.phase in {"completed", "completion_observed", "awaiting_reset"} else
+                "running" if run.started_at else "queued"
+            )
             rows.append({
                 "id": -order.accepted_sequence, "order_type": order.order_type, "order_id": order.order_id,
                 "plc_order_number": order.plc_order_number, "planned_quantity": planned,
