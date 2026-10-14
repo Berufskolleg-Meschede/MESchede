@@ -99,9 +99,6 @@ export default function AnalyticsPage() {
       </header>
 
       {error && <p role="alert" className="rounded-sm border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">Analysedaten konnten nicht geladen werden. Backend-Verbindung prüfen und erneut versuchen.</p>}
-      {!error && <p role="status" className="rounded-sm border border-border bg-secondary/35 p-3 text-sm text-muted-foreground">
-        Gut- und Fehlmengen sind unbekannt, solange die Steuerung dafür keine bestätigten Rückmeldefelder bereitstellt. Sollmengen werden nicht als Produktion gezählt.
-      </p>}
 
       <div className="grid grid-cols-2 gap-px overflow-hidden rounded-sm border border-border bg-border md:grid-cols-4">
         <div className="bg-card px-5 py-4"><p className="text-sm text-muted-foreground">Auftragsläufe</p><p className="mt-2 text-2xl font-semibold tabular-nums">{loading || error ? '-' : runs.length}</p></div>
