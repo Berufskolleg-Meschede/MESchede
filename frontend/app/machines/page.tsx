@@ -1,3 +1,3 @@
-export default function Machine() {
-    return null
+export default function MachinePage() {
+  return null
 }

@@ -1,0 +1,52 @@
+{
+  "repository": "Berufskolleg-Meschede/MESchede",
+  "collection_id": "meschede-projektwoche-v2",
+  "issues": {
+    "COLLECTION": {
+      "number": 19,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/19"
+    },
+    "CONFIG": {
+      "number": 32,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/32"
+    },
+    "ANALYTICS": {
+      "number": 31,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/31"
+    },
+    "OVERVIEW": {
+      "number": 29,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/29"
+    },
+    "MANUAL": {
+      "number": 30,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/30"
+    },
+    "INVENTORY": {
+      "number": 25,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/25"
+    },
+    "DEPLOYMENT": {
+      "number": 22,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/22"
+    },
+    "INTEGRATION": {
+      "number": 35,
+      "url": "https://github.com/Berufskolleg-Meschede/MESchede/issues/35"
+    }
+  },
+  "consolidation": {
+    "27": 32,
+    "20": 29,
+    "21": 29,
+    "23": 29,
+    "24": 29,
+    "26": 29,
+    "28": 29,
+    "33": 29,
+    "34": 35,
+    "36": 35,
+    "37": 35,
+    "38": 35
+  }
+}

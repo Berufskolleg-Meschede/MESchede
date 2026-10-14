@@ -1,21 +1,19 @@
-import os
-
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio.session import async_sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio.session import async_sessionmaker
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+from app.db.url import get_postgres_url
 
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+
+engine = create_async_engine(get_postgres_url("asyncpg"), echo=True, future=True)
+async_session_factory = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
 async def get_session():
-    async_session = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    async with async_session() as session:
+    async with async_session_factory() as session:
         yield session

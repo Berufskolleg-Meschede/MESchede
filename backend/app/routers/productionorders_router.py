@@ -1,51 +1,47 @@
-from fastapi import APIRouter
-router = APIRouter(
-    prefix="/productionorder",
-    tags=["productionorder"]
-)
-@router.get("/")
-def list_productionorders():
-    """
-    List all productionorders
-    :return:All production orders"""
+"""Dauerhafte Produktionsannahme und typspezifische Leseansichten."""
 
-    raise NotImplementedError("Method not implemented yet.")
-    #TODO: Implement getting all productionorders
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
-@router.get("/{productionorder_id}")
-def get_productionorder(productionorder_id: str):
-    """
-    Get a single productionorder
-    :param productionorder_id: The id of the productionorder to get
-    :return: The productionorder with the given id"""
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement getting a single productionorder
+from app.domain.order_run import OrderType
+from app.models.order_dto import OrderPageView, OrderPayload, OrderView
+from app.routers.order_dependencies import execute_order_operation, get_order_worker
+from app.services.order_admission_service import OrderAdmissionService
+from app.services.order_query_service import OrderQueryService
+from app.workers.order_worker_host import OrderWorkerHost
 
-@router.post("/")
-def post_productionorder():
-    """
-    posts a single productionorder
-    :return: status of operation
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement creating a new productionorder
 
-@router.patch("/{productionorder_id}")
-def patch_productionorder(productionorder_id: str):
-    """
-    updates a single productionorder by its id
-    :param productionorder_id: the id of the productionorder to update
-    :return: the updated productionorder
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement updating a productionorder
+router = APIRouter(prefix="/productionorder", tags=["productionorder"])
 
-@router.delete("/{productionorder_id}")
-def delete_productionorder(productionorder_id: str):
-    """
-    deletes a single productionorder by its id
-    :param productionorder_id:
-    :return: status of operation
-    """
-    raise NotImplementedError("Method not implemented yet.")
-    # TODO: Implement deleting a productionorder
+
+@router.get("/", response_model=OrderPageView)
+async def list_productionorders(
+    offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+    search: str = Query("", max_length=200),
+    status: str | None = Query(None, pattern="^(pending|in_progress|error|completed|review_required)$"),
+    worker: OrderWorkerHost = Depends(get_order_worker),
+):
+    """Liefert nur Produktionsaufträge mit gemeinsamer globaler Reihenfolge."""
+    query = OrderQueryService(worker.repository, worker.settings)
+    return await execute_order_operation(lambda: query.page(OrderType.PRODUCTION, worker.running, offset, limit, search, status))
+
+
+@router.get("/queue-status")
+async def get_production_queue_status(worker: OrderWorkerHost = Depends(get_order_worker)):
+    """Liest Diagnosen ohne Kontakt zur PLC."""
+    return await execute_order_operation(lambda: worker.diagnostics(OrderType.PRODUCTION))
+
+
+@router.get("/{order_id:path}", response_model=OrderView)
+async def get_productionorder(order_id: str, worker: OrderWorkerHost = Depends(get_order_worker)):
+    """Löst eine fachliche ID innerhalb des Produktionsbereichs auf."""
+    query = OrderQueryService(worker.repository, worker.settings)
+    return await execute_order_operation(lambda: query.detail(OrderType.PRODUCTION, order_id))
+
+
+@router.post("/", status_code=status.HTTP_202_ACCEPTED)
+async def post_productionorder(payload: OrderPayload, worker: OrderWorkerHost = Depends(get_order_worker)):
+    """Bestätigt nach Speicherung die Annahme, nicht den PLC-Start."""
+    if not worker.running:
+        raise HTTPException(503, "Der Auftragsworker ist nicht gestartet. Bitte den Backendstatus prüfen.")
+    admission = OrderAdmissionService(worker.repository)
+    return await execute_order_operation(lambda: admission.accept(OrderType.PRODUCTION, payload))

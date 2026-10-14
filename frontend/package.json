@@ -6,18 +6,24 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:e2e": "playwright test",
+    "dev:preview": "node --experimental-strip-types tests/preview/start.mjs",
+    "test:preview": "node --experimental-strip-types --test tests/preview/store.test.mjs && playwright test --config playwright.preview.config.ts"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.555.0",
     "next": "16.0.6",
+    "radix-ui": "^1.5.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "recharts": "^3.8.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

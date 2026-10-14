@@ -1,13 +1,22 @@
 # MESchede
 <img width="1408" height="768" alt="MESchede_logo" src="https://github.com/user-attachments/assets/9758b6bb-5531-4954-ba74-01026f9bc85c" />
 
-A school project developed at **Berufskolleg Meschede** that implements a lightweight manufacturing execution system (MES). The application manages production orders, delivery orders, storage/inventory, and factory sites, and integrates with an external **Azubi-ERP** system.
+A school project developed at **Berufskolleg Meschede** that implements a lightweight manufacturing execution system (MES). The application manages production orders, delivery orders, storage/inventory, and factory sites, and connects to a real PLC via OPC UA.
+
+## Documentation
+
+This README covers setup and the high-level architecture. For deeper reference material (data model, full API contract, OPC UA/PLC handshake details, deployment, frontend status), see the **[Project Wiki](https://github.com/Berufskolleg-Meschede/MESchede/wiki)**.
+
+## OPC UA integration
+
+See [the current PLC handshake and offline testing guide](docs/opc-ua-integration.md).
+An example production request is saved in `backend/examples/production-order.json`.
 
 ---
 
 ## Architecture Overview
 
-The project follows a classic **three-tier architecture**:
+The project follows a classic **three-tier architecture**, plus a direct OPC UA link from the backend to the PLC:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -17,28 +26,33 @@ The project follows a classic **three-tier architecture**:
                             │ HTTP / REST
 ┌───────────────────────────▼──────────────────────────────┐
 │              FastAPI Backend (Port 8000)                  │
-│   /sites  /storage  /productionorder  /deliveryorder     │
-└───────────────────────────┬──────────────────────────────┘
-                            │ SQLAlchemy / psycopg
-┌───────────────────────────▼──────────────────────────────┐
-│               PostgreSQL Database (Port 5432)             │
-└──────────────────────────────────────────────────────────┘
+│  /storage  /productionorder  /deliveryorder  /orders      │
+│              /settings  /analytics                        │
+└──────────┬────────────────────────────────┬───────────────┘
+           │ SQLAlchemy / psycopg           │ OPC UA
+┌──────────▼───────────────────┐  ┌─────────▼───────────────┐
+│   PostgreSQL Database         │  │   PLC (Siemens S7)       │
+│        (Port 5432)            │  │  DB_MES_Schnittstelle    │
+└────────────────────────────────┘  └──────────────────────────┘
 ```
 
-Storage changes are published to **RabbitMQ** (running on the NAS) so external services like the ERP can consume them asynchronously:
+**RabbitMQ** (running on the NAS) carries stock events from the ERP into the MES: a background consumer (`storage_consumer.py`) reads inventory snapshots/deltas from an inbound queue and keeps the local `Storage` table in sync. This is the path that is actually wired up and running today.
 
 ```
 ┌─────────────────────┐        AMQP         ┌─────────────────────┐
-│   FastAPI Backend   │ ──────────────────► │      RabbitMQ       │
-│     (Producer)      │                     │   Queue: storage    │
+│   ERP / Producer(s) │ ──────────────────► │      RabbitMQ       │
+│                      │                     │  Inbound stock queue │
 └─────────────────────┘                     └──────────┬──────────┘
-                                                       │
-                                          ┌────────────▼────────────┐
-                                          │    ERP / Consumer(s)    │
-                                          └─────────────────────────┘
+                                                        │
+                                           ┌────────────▼────────────┐
+                                           │   FastAPI Backend       │
+                                           │  (storage_consumer)     │
+                                           └─────────────────────────┘
 ```
 
-All three core services are orchestrated together using **Docker Compose**.
+A matching outbound publisher (`app/clients/rabbitmq/base.py`, a `storage` queue) exists in the codebase but is **not currently called from anywhere in the running application** — treat it as a building block for a future outbound flow, not as live behavior.
+
+Development Compose starts PostgreSQL and the backend; start the frontend separately. Production Compose uses the published images and configures the frontend proxy to the backend.
 
 ---
 
@@ -51,8 +65,9 @@ All three core services are orchestrated together using **Docker Compose**.
 | ORM        | [SQLModel](https://sqlmodel.tiangolo.com/) + [SQLAlchemy](https://www.sqlalchemy.org/) |
 | Migrations | [Alembic](https://alembic.sqlalchemy.org/)      |
 | Database   | [PostgreSQL](https://www.postgresql.org/)       |
+| PLC access | [opcua](https://github.com/FreeOpcUa/python-opcua) (OPC UA client) |
+| Messaging  | [RabbitMQ](https://www.rabbitmq.com/) via [pika](https://pika.readthedocs.io/) (AMQP) |
 | Container  | [Docker](https://www.docker.com/) / [Docker Compose](https://docs.docker.com/compose/) |
-| Messaging  | [RabbitMQ](https://www.rabbitmq.com/) via AMQP  |
 
 ---
 
@@ -60,31 +75,36 @@ All three core services are orchestrated together using **Docker Compose**.
 
 ```
 MESchede/
-├── docker-compose.yaml          # Orchestrates all services
+├── docker-compose.yaml          # Dev orchestration (db + backend)
+├── docker-compose.prod.yml      # Prod orchestration (published images, Traefik)
 ├── backend/                     # FastAPI application
 │   ├── app/
-│   │   ├── main.py              # Application entry point
+│   │   ├── main.py              # Application entry point, router + worker wiring
 │   │   ├── routers/             # API route handlers
-│   │   │   ├── sites_router.py
 │   │   │   ├── storage_router.py
 │   │   │   ├── productionorders_router.py
-│   │   │   └── deliveryorders_router.py
-│   │   ├── models/              # SQLModel database models
-│   │   │   ├── machine.py
-│   │   │   ├── user.py
-│   │   │   └── enums.py
-│   │   ├── clients/
-│   │   │   └── rabbitmq/
-│   │   │       └── base.py      # RabbitMQ client & publisher
-│   │   ├── services/            # Business logic
-│   │   └── db/                  # Database connection and session management
-│   ├── alembic/                 # Database migration scripts
+│   │   │   ├── deliveryorders_router.py
+│   │   │   ├── orders_router.py          # combined overview + manual review
+│   │   │   ├── settings_router.py        # OPC UA node/config management
+│   │   │   └── analytics_router.py
+│   │   ├── models/              # SQLModel database models + pydantic DTOs
+│   │   ├── domain/               # order/run state machine (phases, transitions)
+│   │   ├── repositories/        # persistence for the order pipeline
+│   │   ├── services/            # business logic (dispatch, analytics, reviews, settings)
+│   │   ├── workers/             # background order worker + RabbitMQ consumer
+│   │   ├── clients/             # OPC UA client + PLC order gateway (live); RabbitMQ outbound publisher (currently unused)
+│   │   └── db/                  # database connection and session management
+│   ├── alembic/                 # database migration scripts
+│   ├── tests/                   # pytest suite (unit + integration, simulated PLC)
 │   ├── Dockerfile
 │   └── requirements.txt
 └── frontend/                    # Next.js application
     ├── app/                     # Next.js App Router pages
-    ├── lib/                     # Shared utilities
-    ├── public/                  # Static assets
+    ├── components/               # shared UI components (order list, review dialog, …)
+    ├── hooks/                    # React hooks (e.g. polling order snapshots)
+    ├── lib/                      # API clients, formatting helpers, shared types
+    ├── tests/                   # Playwright e2e tests + in-memory preview harness
+    ├── public/                  # static assets
     └── Dockerfile
 ```
 
@@ -92,35 +112,53 @@ MESchede/
 
 ## API Endpoints
 
-### Internal API (Backend)
+All endpoints below are implemented by the routers under `backend/app/routers/`. Across the order-pipeline endpoints (`/productionorder`, `/deliveryorder`, `/orders`), domain errors map to HTTP status codes consistently: **409** (conflicting/stale state, e.g. reviewing with an outdated version), **404** (order/run not found), **422** (validation error), **503** (order worker not running / database unreachable).
+
+### Storage
 
 | Method | Endpoint                         | Description                          |
-|--------|----------------------------------|--------------------------------------|
-| GET    | `/sites/`                        | List all factory sites               |
-| GET    | `/storage/`                      | List entire storage inventory        |
+|--------|-----------------------------------|--------------------------------------|
+| GET    | `/storage/`                      | List stock for every article (articles without a stock row still appear) |
+| GET    | `/storage/status`                | RabbitMQ consumer health (`configured`, `connected`, `last_error`, staleness) |
 | GET    | `/storage/{item_id}`             | Get stock for a specific item        |
 | POST   | `/storage/{item_id}`             | Add new stock for an item            |
 | PATCH  | `/storage/{item_id}`             | Update stock for an item             |
 | PATCH  | `/storage/{item_id}/{amount}`    | Add or subtract stock by amount      |
-| GET    | `/productionorder/`              | List all production orders           |
-| GET    | `/productionorder/{id}`          | Get a single production order        |
-| POST   | `/productionorder/`              | Create a new production order        |
-| PATCH  | `/productionorder/{id}`          | Update a production order            |
-| DELETE | `/productionorder/{id}`          | Delete a production order            |
-| GET    | `/deliveryorder/`                | List all delivery orders             |
-| GET    | `/deliveryorder/{id}`            | Get a single delivery order          |
-| POST   | `/deliveryorder/`                | Create a new delivery order          |
-| PATCH  | `/deliveryorder/{id}`            | Update a delivery order              |
-| DELETE | `/deliveryorder/{id}`            | Delete a delivery order              |
 
-### External API (Azubi-ERP Integration)
+### Production & delivery orders
+
+`/productionorder` and `/deliveryorder` expose the same contract for the two order types:
+
+| Method | Endpoint                               | Description                          |
+|--------|------------------------------------------|---------------------------------------|
+| GET    | `/productionorder/` · `/deliveryorder/` | Paginated, searchable, status-filterable order list |
+| GET    | `/productionorder/queue-status` · `/deliveryorder/queue-status` | Worker/queue diagnostics (DB only, no PLC contact) |
+| GET    | `/productionorder/{order_id}` · `/deliveryorder/{order_id}` | Full order/run detail, including per-product-unit results |
+| POST   | `/productionorder/` · `/deliveryorder/` | Admit a new order → **202 Accepted** (durable admission, not completion); **503** if the order worker isn't running |
+
+### Combined overview & manual review
+
+| Method | Endpoint                               | Description                          |
+|--------|------------------------------------------|---------------------------------------|
+| GET    | `/orders/overview`                      | Combined production + delivery summary, dispatch state, PLC source health, active/waiting orders — stored data only |
+| POST   | `/orders/runs/{run_id}/reviews`         | Submit a manual outcome (completed/interrupted/unknown) and quantities for a run; optimistic-concurrency protected (`expected_version`) and idempotent per `request_id` |
+
+### Settings
+
+| Method | Endpoint      | Description                          |
+|--------|---------------|---------------------------------------|
+| GET    | `/settings/`  | Current OPC UA node names and polling interval |
+| PUT    | `/settings/`  | Update node names/interval; **409** if a target node changes while an order of that type is active |
+
+### Analytics
 
 | Method | Endpoint     | Description                                        |
-|--------|--------------|----------------------------------------------------|
-| GET    | `/inventory` | Retrieve current inventory to check production readiness |
-| POST   | `/inventory` | Insert new items into inventory                    |
-| GET    | `/article`   | Retrieve article information                       |
-| GET    | `/order`     | Retrieve newest orders and execution details       |
+|--------|--------------|-----------------------------------------------------|
+| GET    | `/analytics/` | Historical runs, filterable by `from`/`to` date and `order_type` |
+
+### External integration
+
+There is no REST API exposed to or consumed from the ERP system. The MES ↔ ERP integration is asynchronous via **RabbitMQ**: an inbound stock-events consumer is wired into the backend today (activated once `RABBITMQ_STORAGE_INBOUND_QUEUE` is configured); an outbound publisher class also exists in the code but isn't called from anywhere yet — see [RabbitMQ Integration](#rabbitmq-integration) below and the [Wiki](https://github.com/Berufskolleg-Meschede/MESchede/wiki) for the full contract.
 
 ---
 
@@ -138,9 +176,12 @@ MESchede/
    cd MESchede
 ```
 
-2. Create the required environment files:
-   - `backend/.env` – backend environment variables (database URL, RabbitMQ URL, etc.)
-   - `backend/.env.db` – PostgreSQL credentials
+2. Create the required environment files from the provided examples and fill in real values:
+   - `backend/.env` (from `backend/.env.example`) – database URL, OPC UA endpoint/credentials, RabbitMQ URL, order worker timeouts, product-result mapping
+   - `backend/.env.db` (from `backend/.env.db.example`) – PostgreSQL credentials (must match `backend/.env`)
+   - `frontend/.env` (from `frontend/.env.example`, production only) – `MES_BACKEND_URL` (orders proxy) and `BACKEND_INTERNAL_URL` (settings/storage/analytics proxy)
+
+   > `env_file` values are **not** shell-interpolated by Docker Compose: `DATABASE_URL`/`ALEMBIC_DATABASE_URL` must repeat the literal host/credentials rather than reference the `POSTGRES_*` variables.
 
 3. Start all services:
 ```bash
@@ -148,7 +189,7 @@ MESchede/
 ```
 
 4. The services will be available at:
-   - **Frontend**: http://localhost:3000
+   - **Frontend**: http://localhost:3000 after starting it separately with `npm run dev`
    - **Backend API**: http://localhost:8000
    - **API Docs (Swagger)**: http://localhost:8000/docs
    - **Database**: localhost:5432
@@ -175,8 +216,7 @@ npm run dev
 ## RabbitMQ Integration
 
 ### Übersicht
-Das MES nutzt RabbitMQ als Message Broker um Lagermengen-Änderungen als Nachrichten zu publishen.
-Andere Services (z.B. ERP) können diese Nachrichten unabhängig aus der Queue abholen und verarbeiten.
+Das MES nutzt RabbitMQ als Message Broker für Lagerbestandsdaten. Aktuell **tatsächlich verdrahtet und aktiv** ist die eingehende Richtung: ein Hintergrund-Consumer (`app/workers/storage_consumer.py`) liest Bestandsmeldungen aus einer Eingangsqueue und schreibt sie in die lokale `Storage`-Tabelle (siehe „Bestandsmeldungen an das MES“ unten). Die unten gezeigte `RabbitMQClient`/`send_storage_message`-Klasse für die ausgehende Richtung (`app/clients/rabbitmq/base.py`) existiert im Code, wird aber **von keiner laufenden Stelle der Anwendung aufgerufen** — sie ist als Bausteine für eine künftige ausgehende Veröffentlichung von Lagermengen-Änderungen gedacht, nicht als aktuelles Verhalten.
 
 RabbitMQ läuft als Docker-Container auf dem NAS und ist über folgende Ports erreichbar:
 
@@ -227,14 +267,45 @@ with RabbitMQClient() as client:
 2. Login mit den Zugangsdaten aus der `.env`
 3. **Queues → storage → Get Messages** um Nachrichten einzusehen
 
-### Consumer hinzufügen
+### Bestandsmeldungen an das MES (Vertragsentwurf)
+
+Der MES-Consumer liest eine separate Eingangsqueue. `storage` bleibt die vom MES beschriebene
+Ausgangsqueue und darf nicht zugleich als ERP-Eingangsqueue verwendet werden. Setze
+`RABBITMQ_STORAGE_INBOUND_QUEUE` erst auf die mit der Lager-/ERP-Gruppe abgestimmte Queue.
+
+Der im Backend erwartete Vertragsentwurf ist:
+
+```json
+{
+  "event_id": "eindeutige-ereignis-id",
+  "event_type": "snapshot",
+  "product_id": 42,
+  "quantity": 12,
+  "occurred_at": "2026-10-13T08:00:00Z"
+}
+```
+
+`event_type` ist `snapshot` oder `delta`. Snapshots setzen `quantity`, Änderungen setzen
+`quantity_delta`. Jede Nachricht enthält `occurred_at` mit Zeitzone und eine eindeutige
+`event_id` (alternativ AMQP `message_id`). Änderungen werden erst nach einem Snapshot für
+den Artikel angewendet; so wird ein unbekannter Bestand nicht als null behandelt. Duplikate
+werden anhand der Ereignis-ID ignoriert. Diese Felder und Regeln sind noch mit der
+Lager-/ERP-Gruppe zu bestätigen; ohne separate Eingangsqueue bleibt der Consumer deaktiviert.
+
+`STORAGE_STALE_AFTER_SECONDS` steuert, wann ein lange nicht aktualisierter Bestand als veraltet
+markiert wird (Vorgabewert: 3600 Sekunden; ebenfalls mit der Gruppe abzustimmen).
+
+### Beispiel für einen generischen Queue-Consumer
 
 ```python
 import pika, json, os
 
 connection = pika.BlockingConnection(pika.URLParameters(os.getenv("RABBITMQ_URL")))
 channel = connection.channel()
-channel.queue_declare(queue="storage", durable=True)
+queue_name = os.getenv("RABBITMQ_STORAGE_INBOUND_QUEUE")
+if not queue_name or queue_name == "storage":
+    raise RuntimeError("Eine separate Eingangsqueue für Lagerdaten konfigurieren")
+channel.queue_declare(queue=queue_name, passive=True)
 
 def callback(ch, method, properties, body):
     nachricht = json.loads(body)
@@ -242,7 +313,7 @@ def callback(ch, method, properties, body):
     ch.basic_ack(delivery_tag=method.delivery_tag)
 
 channel.basic_qos(prefetch_count=1)
-channel.basic_consume(queue="storage", on_message_callback=callback)
+channel.basic_consume(queue=queue_name, on_message_callback=callback)
 channel.start_consuming()
 ```
 
@@ -256,9 +327,14 @@ channel.start_consuming()
 - **Next.js** provides server-side rendering capabilities and a strong developer experience for the frontend.
 - **Docker Compose** simplifies local development and deployment by bundling all services together.
 - **RabbitMQ via AMQP** was chosen over MQTT because it is the native protocol of RabbitMQ with full support for queues, routing, and guaranteed message delivery — without additional plugins or configuration.
+- **Optimistic concurrency + manual review** for order runs: the PLC handshake alone cannot always prove a result (e.g. unmapped product codes, a restart mid-run), so uncertain runs are surfaced for a human review instead of silently guessing, and a review itself is version-checked so two people can't overwrite each other's decision.
 
 ---
 
+## License
+
+This project is licensed under the [MIT License](LICENSE).
+
 ## Contributing
 
-This is a school project. Contributions from students at Berufskolleg Meschede are welcome. Please open an issue or pull request for any improvements.
+This is a school project. Contributions from students at Berufskolleg Meschede are welcome. See the [Wiki's "Mitwirken" page](https://github.com/Berufskolleg-Meschede/MESchede/wiki/Mitwirken) for the branch/commit workflow, and please open an issue or pull request for any improvements.
