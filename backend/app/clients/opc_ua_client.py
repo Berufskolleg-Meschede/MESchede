@@ -126,6 +126,9 @@ class OpcUaClient(ProductionClient):
         kopf = self._get_child(root_node, kopf_node)
         return self._get_child(kopf, auftragssteuerung_node).get_value()
 
+    def read_fields(self, root_node, field_names: list[str]) -> dict[str, Any]:
+        return {name: self._get_child(root_node, name).get_value() for name in field_names}
+
     def read_anzahl(self, root_node, inhalt_node: str = "Inhalt") -> int:
         inhalt = self._get_child(root_node, inhalt_node)
         return self._get_child(inhalt, "Anzahl").get_value()

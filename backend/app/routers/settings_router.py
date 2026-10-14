@@ -60,6 +60,10 @@ async def put_settings(
     current.opcua_node_auftragssteuerung = payload.opcua_node_auftragssteuerung
     current.opcua_node_status = payload.opcua_node_status
     current.opcua_node_produktqueue_pattern = payload.opcua_node_produktqueue_pattern
+    current.opcua_node_lager_gehaeuse = payload.opcua_node_lager_gehaeuse
+    current.opcua_node_magazin_deckel_1 = payload.opcua_node_magazin_deckel_1
+    current.opcua_node_magazin_deckel_2 = payload.opcua_node_magazin_deckel_2
+    current.opcua_node_lager_produkte = payload.opcua_node_lager_produkte
 
     session.add(current)
     await session.commit()

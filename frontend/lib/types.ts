@@ -80,6 +80,35 @@ export interface Settings {
   opcua_node_auftragssteuerung: string
   opcua_node_status: string
   opcua_node_produktqueue_pattern: string
+  opcua_node_lager_gehaeuse: string
+  opcua_node_magazin_deckel_1: string
+  opcua_node_magazin_deckel_2: string
+  opcua_node_lager_produkte: string
+}
+
+export interface LagerGehaeuseBestand {
+  gesamt: number
+  rot: number
+  silber: number
+  schwarz: number
+}
+
+export interface LagerProdukteBestand {
+  gesamt: number
+  salz_rot: number
+  salz_silber: number
+  salz_schwarz: number
+  pfeffer_rot: number
+  pfeffer_silber: number
+  pfeffer_schwarz: number
+}
+
+export interface LagerSnapshot {
+  gehaeuse: LagerGehaeuseBestand
+  deckel_blau: number
+  deckel_gruen: number
+  produkte: LagerProdukteBestand
+  observed_at: string
 }
 
 export interface FieldErrorDetail {

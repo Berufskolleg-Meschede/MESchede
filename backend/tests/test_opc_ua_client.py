@@ -155,6 +155,32 @@ def test_missing_delivery_node_does_not_fall_back_to_production():
         client._get_child(db, "MESAuftragKommissionieren")
 
 
+# --- read_fields ---
+
+def test_read_fields_returns_each_named_child_value():
+    client = _make_client()
+    root = MagicMock()
+    root.get_children.return_value = [
+        _make_mock_node("StueckzahlGesamt", value=10),
+        _make_mock_node("StueckzahlRot", value=3),
+        _make_mock_node("StueckzahlSilber", value=4),
+        _make_mock_node("StueckzahlSchwarz", value=3),
+    ]
+
+    assert client.read_fields(root, ["StueckzahlGesamt", "StueckzahlRot"]) == {
+        "StueckzahlGesamt": 10, "StueckzahlRot": 3,
+    }
+
+
+def test_read_fields_raises_on_missing_field():
+    client = _make_client()
+    root = MagicMock()
+    root.get_children.return_value = [_make_mock_node("StueckzahlGesamt", value=10)]
+
+    with pytest.raises(KeyError, match="StueckzahlRot"):
+        client.read_fields(root, ["StueckzahlGesamt", "StueckzahlRot"])
+
+
 # --- read_auftragssteuerung ---
 
 def test_read_auftragssteuerung_returns_mes_command():

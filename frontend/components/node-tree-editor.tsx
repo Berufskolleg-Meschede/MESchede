@@ -51,6 +51,26 @@ const NODE_TREE: TreeNodeDef[] = [
       },
     ],
   },
+  {
+    key: 'opcua_node_lager_gehaeuse',
+    label: 'LagerGehaeuse',
+    description: 'Gehäuselager: Gesamtzahl sowie Stückzahlen rot/silber/schwarz.',
+  },
+  {
+    key: 'opcua_node_magazin_deckel_1',
+    label: 'MagazinDeckel_1',
+    description: 'Deckelmagazin 1 (blau): aktuelle Stückzahl.',
+  },
+  {
+    key: 'opcua_node_magazin_deckel_2',
+    label: 'MagazinDeckel_2',
+    description: 'Deckelmagazin 2 (grün): aktuelle Stückzahl.',
+  },
+  {
+    key: 'opcua_node_lager_produkte',
+    label: 'LagerProdukte',
+    description: 'Hochregallager: Gesamtzahl sowie Stückzahlen je Produkt und Farbe.',
+  },
 ]
 
 interface NodeTreeEditorProps {
@@ -130,9 +150,9 @@ export function NodeTreeEditor({ settings, onChange, fieldErrors }: NodeTreeEdit
       <div>
         <h2 className="text-sm font-medium text-foreground">Knotenstruktur</h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          Struktur der Kindknoten unterhalb des Produktions- bzw. Lieferauftrags-Zielnodes. Die
-          Struktur selbst ist fest vorgegeben; nur die Browse-Namen sind editierbar, falls sich die
-          Anlagenkonfiguration ändert.
+          Struktur der Kindknoten unterhalb des Produktions- bzw. Lieferauftrags-Zielnodes sowie
+          die Lagerknoten für die Lagerbestandsseite. Die Struktur selbst ist fest vorgegeben; nur
+          die Browse-Namen sind editierbar, falls sich die Anlagenkonfiguration ändert.
         </p>
       </div>
       <ul>
