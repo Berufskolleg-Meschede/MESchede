@@ -59,7 +59,7 @@ class OrderView(BaseModel):
     good_quantity: int | None
     error_quantity: int | None
     result_complete: bool
-    quantity_source: Literal["plc", "manual", "mixed", "unknown"]
+    quantity_source: Literal["plc", "completion", "manual", "mixed", "unknown"]
     review_required: bool
     review_reason: str | None
     has_manual_review: bool

@@ -27,12 +27,13 @@ from tests.test_order_services import finished_snapshot, running_order
 SETTINGS = OrderSettings(contract_verified=True, product_results={11: 'good', 12: 'failed'}, rest_buffer_s=0)
 
 
-def test_unknown_verified_product_codes_keep_quantities_unknown(order_repository, order_payload):
+def test_unknown_verified_product_codes_assume_success_after_completion(order_repository, order_payload):
     stored = running_order(order_repository, order_payload())
     ProductResultService(order_repository, SETTINGS).observe(stored.run.id, finished_snapshot(order_repository, statuses=(99,99)))
     view = OrderQueryService(order_repository, SETTINGS).detail(OrderType.PRODUCTION, 'test-1')
-    assert (view.good_quantity, view.error_quantity, view.processed_quantity) == (None,None,None)
-    assert not view.result_complete
+    assert (view.good_quantity, view.error_quantity, view.processed_quantity) == (2,0,2)
+    assert view.result_complete
+    assert view.quantity_source == 'completion'
     assert [unit.raw_status for unit in view.units] == [99,99]
 
 
@@ -86,6 +87,19 @@ def test_recovery_finishes_partially_cleared_reset_without_losing_results(order_
     assert (view.good_quantity,view.error_quantity) == (1,1)
     assert view.run_phase == RunPhase.COMPLETED
     assert gateway.events == [('ack',OrderType.PRODUCTION)]
+
+
+def test_idle_after_recorded_completion_resolves_stale_review(order_repository, order_payload):
+    stored = running_order(order_repository, order_payload())
+    service = ProductResultService(order_repository, SETTINGS)
+    service.observe(stored.run.id, finished_snapshot(order_repository))
+    order_repository.require_review(stored.run.id, 'Veraltete Prüfung nach erfolgreichem Abschluss')
+    idle = replace(finished_snapshot(order_repository), command=0, status=0, product_count=0, products=())
+
+    assert service.observe(stored.run.id, idle)
+    run = order_repository.snapshot().orders[0].run
+    assert not run.review_required
+    assert run.phase == RunPhase.COMPLETED.value
 
 
 def test_status_zero_with_nonzero_count_is_not_ready(order_repository, order_payload):

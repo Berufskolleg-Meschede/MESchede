@@ -26,7 +26,7 @@ export function RunSummary({ order, onReview }: { order: OrderRunView; onReview?
         <span>Start beobachtet: {timestamp(order.started_at)}</span><span>Ende beobachtet: {timestamp(order.ended_at)}</span>
         <span>Steuerungsauftrag: {order.plc_order_number}</span>
         {order.has_manual_review && <span className="text-primary">Manuell bewertet</span>}
-        <span>Mengenherkunft: {{ plc: 'PLC-Rückmeldung', manual: 'Manuelle Bewertung', mixed: 'PLC und manuelle Bewertung', unknown: 'Unbekannt' }[order.quantity_source]}</span>
+        <span>Mengenherkunft: {{ plc: 'PLC-Rückmeldung', completion: 'Auftragsabschluss (Erfolg angenommen)', manual: 'Manuelle Bewertung', mixed: 'PLC und manuelle Bewertung', unknown: 'Unbekannt' }[order.quantity_source]}</span>
       </div>
       {order.review_required && order.review_reason && <p className="px-5 pb-3 text-sm text-muted-foreground">Prüfgrund: {order.review_reason}</p>}
       <div className="border-t border-border px-5 py-3"><h3 className="text-sm font-medium">Produktqueue dieses Laufs</h3>

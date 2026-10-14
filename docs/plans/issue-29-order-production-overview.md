@@ -288,9 +288,9 @@ Jeder Schritt endet mit einer verständlichen Erklärung: **Was wurde geändert?
 - Migration `7a92c04e31bf` ergänzt sechs Auftragstabellen; frisches Upgrade und Upgrade mit bestehenden Maschinen-/Benutzerdaten sind isoliert geprüft.
 - Gemeinsame Reservierung und Session-Advisory-Lock schützen beide Auftragstypen; `start_pending` ist vor dem PLC-Schreiben committed.
 - Endresultate werden vor Reset gesichert. Reset löscht nur MES-Produktinput, prüft Readback und setzt Anzahl vor Kommando null. Teilreset verwendet bereits gesicherte Fakten.
-- Review hat keinen Gateway; Hintergrundverarbeitung leitet aus manueller Bewertung keinen Reset ab. Spätere widersprechende PLC-Fakten bleiben erhalten und erzeugen neue Prüfung.
+- Review hat keinen Gateway; eine korrelierte PLC-Abschlussmeldung gilt als erfolgreicher Auftrag und setzt fehlende Einzelresultate auf erfolgreich. Ist die Steuerung nach dem gespeicherten Abschluss bereits auf Idle zurückgesetzt, wird eine veraltete Review-Sperre beim Abgleich aufgehoben.
 - Gemeinsame UI-Komponenten `OrderList`, `WaitingOrders`, `RunSummary`, `RunReviewDialog`, `OrderPageFeedback` sowie der Pollinghook sind an die reale API angebunden.
 - Browserprüfungen und visueller Vergleich sind erfolgt. Reale Codes, Produktstatusfelder, Identitäten, Reset-Lebenszyklus und Anlagenbereitschaft sind noch extern zu bestätigen.
-- Der Standard `OPC_UA_CONTRACT_VERIFIED=false` bleibt bestehen. Keine reale PLC wurde in dieser Fortsetzung kontaktiert; Arbeiten außerhalb des IoT-Netzes sind abgeschlossen, die Spec bleibt bis zur erforderlichen Anlagenabnahme `Modified`.
+- Produktstatuscodes werden nur mit bestätigter Zuordnung ausgewertet; ohne Zuordnung gilt ein korrelierter Endstatus als erfolgreicher Auftrag, und fehlende Einzelwerte werden als erfolgreich angenommen. Ein realer Simulationslauf wurde am 2026-10-14 beendet und manuell mit 2/2 erfolgreich bewertet; die automatische Abschlussregel ist danach entsprechend angepasst. Weitere Anlagenabnahmen bleiben offen.
 
 **Letzter lokaler Nachweis:** 130 Backendtests und 22 Browserprüfungen bestanden; Build, TypeScript und ESLint erfolgreich. Tatsächliche Testzuordnung siehe Harness-Testkatalog.

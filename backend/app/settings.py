@@ -1,4 +1,4 @@
-"""Validierte Betriebswerte für Auftragsbeobachtung und Vertragsfreigabe."""
+"""Validierte Betriebswerte für Auftragsbeobachtung und Produktergebniszuordnung."""
 
 import json
 import math
@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class OrderSettings:
-    """Unbekannte Produktsignale bleiben ohne expliziten Vertragsnachweis unbekannt."""
+    """Wertet Produktstatuscodes nur mit explizit bestätigter Zuordnung aus."""
 
     poll_interval_s: float = 0.5
     refresh_interval_s: float = 2.0
@@ -33,11 +33,11 @@ class OrderSettings:
         if any(value not in {"good", "failed"} for value in self.product_results.values()):
             raise ValueError("Produktsignale müssen als good oder failed zugeordnet werden.")
         if self.product_results and not self.contract_verified:
-            raise ValueError("Produktcodes benötigen einen bestätigten PLC-Vertrag.")
+            raise ValueError("Produktcodes benötigen eine bestätigte Ergebniszuordnung.")
 
     @classmethod
     def from_environment(cls) -> "OrderSettings":
-        """Lädt zentrale Werte; ohne geprüften Vertrag erfolgen keine neuen PLC-Starts."""
+        """Lädt zentrale Werte; unbekannte Einzelresultate werden nach Status 5 erfolgreich angenommen."""
         results = json.loads(os.getenv("OPC_UA_PRODUCT_RESULTS", "{}"))
         return cls(
             poll_interval_s=float(os.getenv("ORDER_POLL_INTERVAL_S", "0.5")),

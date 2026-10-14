@@ -54,10 +54,10 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 ## I29 – Eindeutige Produkteinheiten und Ergebnismengen
 
 - **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
-- **Akzeptanzkriterium:** AC-07 bis AC-11: getrennte Mengen, Korrelation, keine Doppelzählung und unvollständige Ergebnisse.
+- **Akzeptanzkriterium:** AC-07 bis AC-11: getrennte Mengen, Korrelation, keine Doppelzählung und Erfolg bei bestätigtem Auftragsabschluss.
 - **State:** Passed
 - **Testdatei:** `backend/tests/test_order_services.py`, `backend/tests/test_order_reliability.py`
-- **Test:** `test_repeated_product_results_do_not_increment_quantities`, `test_unverified_codes_do_not_fabricate_good_or_failed_quantities`, `test_foreign_order_does_not_change_product_results`, `test_unknown_verified_product_codes_keep_quantities_unknown`, `test_later_plc_contradiction_preserves_facts_and_requires_new_review`
+- **Test:** `test_repeated_product_results_do_not_increment_quantities`, `test_completed_order_assumes_success_when_result_codes_are_unmapped`, `test_foreign_order_does_not_change_product_results`, `test_unknown_verified_product_codes_assume_success_after_completion`, `test_later_plc_contradiction_preserves_facts_and_requires_new_review`
 - **Prüft:** Wiederholte Resultate, wiederverwendete PLC-Slots, fremde Läufe, unbekannte Ergebnisse und gemischte Gut-/Fehlresultate.
 - **Ausführung:** `cd backend; python3 -m pytest -q --tb=short --order-test-db-url=postgresql+psycopg2://mes_test:mes_test@127.0.0.1:55429/mes_test`: 130 Passed am 2026-10-13, einschließlich Start-/Lauf-/Resettimeout.
 - **Hinweis:** Synthetische Fixtures 11/12 sind ausdrücklich kein Live-Vertragsnachweis; echte Codes bleiben offen.
@@ -98,10 +98,10 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 ## I29 – Globale Reviewsperre und Bereitschaft
 
 - **Spec:** `../../docs/specs/issue-29-order-production-overview.md`
-- **Akzeptanzkriterium:** AC-22 bis AC-24: beide Startarten blockiert bis zur Prüfung und bestätigter PLC-Bereitschaft.
+- **Akzeptanzkriterium:** AC-22 bis AC-24: beide Startarten bei offenem Ausführungsreview oder fehlender PLC-Bereitschaft blockiert.
 - **State:** Passed
 - **Testdatei:** `backend/tests/test_order_repository.py`, `backend/tests/test_order_reliability.py`, `backend/tests/test_order_dispatch.py`
-- **Test:** `test_uncertain_production_blocks_delivery_after_restart`, `test_manual_review_never_resets_active_plc_and_blocks_next_kind`, `test_status_zero_with_nonzero_count_is_not_ready`, `test_execution_timeout_preserves_reservation_and_requires_review`, `test_unverified_contract_never_writes_start`
+- **Test:** `test_uncertain_production_blocks_delivery_after_restart`, `test_manual_review_never_resets_active_plc_and_blocks_next_kind`, `test_status_zero_with_nonzero_count_is_not_ready`, `test_execution_timeout_preserves_reservation_and_requires_review`, `test_ready_order_starts_without_a_product_result_mapping`
 - **Prüft:** Produktionsreview sperrt Lieferung und umgekehrt; mehrere offene Reviews; Review erledigt bei weiterhin aktiver oder unbekannter PLC.
 - **Ausführung:** `cd backend; python3 -m pytest -q --tb=short --order-test-db-url=postgresql+psycopg2://mes_test:mes_test@127.0.0.1:55429/mes_test`: 130 Passed am 2026-10-13, einschließlich Start-/Lauf-/Resettimeout.
 - **Hinweis:** Alle Aufrufwege müssen dieselbe backendseitige Sperre respektieren.

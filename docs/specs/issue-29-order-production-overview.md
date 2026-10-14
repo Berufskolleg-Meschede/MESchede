@@ -73,8 +73,9 @@ Ein Auftrag kann fachlich warten, zur Übergabe vorbereitet werden, bestätigt l
 - Ein beobachtetes, korrekt zugeordnetes Endsignal beendet den Lauf. Ob Einheiten gut oder fehlerhaft sind, ergibt sich getrennt aus den Produktresultaten.
 - Bearbeitete Menge ist die Anzahl eindeutig final bewerteter Einheiten; Gut- und Fehlmenge werden separat ausgewiesen. Bei vollständiger Ergebniserfassung entspricht bearbeitet der Summe aus Gut- und Fehlmenge.
 - Wiederholtes Lesen zählt eine Einheit nicht erneut. Fremde Resultate und Restwerte früherer Läufe werden ausgeschlossen.
-- Fehlende Resultate bleiben unbekannt beziehungsweise unvollständig. Unfertige Einheiten sind keine bestätigten Fehlteile. Eine Sollmenge darf fehlende Istmengen nicht ersetzen.
-- Laufende und beendete Läufe mit fehlenden Einzelresultaten werden als solche mit unvollständigem Ergebnis dargestellt; das Ende ist kein Nachweis vollständiger Produktdaten.
+- Fehlende Einzelresultate während eines laufenden Auftrags bleiben offen; unfertige Einheiten sind keine bestätigten Fehlteile.
+- Ein eindeutig korrelierter PLC-Auftragsabschluss (`StatusMES=5`) gilt als erfolgreicher Auftrag. Bestätigte, zugeordnete PLC-Fehlercodes bleiben als Fehlteile gezählt; fehlende oder nicht zugeordnete Einzelresultate werden als erfolgreich angenommen und in der Mengenherkunft kenntlich gemacht.
+- Ein kurzzeitiger Verlust der PLC-Rückmeldung während eines Laufs verlangt zunächst keine manuelle Prüfung. Wenn derselbe Auftrag später mit `StatusMES=5` bestätigt wird, wird er als erfolgreich abgeschlossen und eine nur aus dem transienten Lesefehler stammende Prüfung automatisch aufgelöst.
 - Start-/Endzeitpunkte beruhen auf bestätigten Signalen. Ein MES-Beobachtungszeitpunkt wird nicht als erfundener PLC-Zeitstempel ausgegeben.
 - Ein Verbindungsfehler verändert nicht stillschweigend den zuletzt bekannten fachlichen Status oder bestätigte Mengen. Quellenstatus und fachlicher Status werden getrennt dargestellt.
 - Lieferabschluss bedeutet den bestätigten Abschluss in der Fabriksimulation, keine belegte Zustellung beim Kunden.
@@ -184,7 +185,7 @@ Dies sind erforderliche technische Nachweise, keine erfundenen Signalverträge. 
 - Bereitschaft für einen neuen Auftrag unter Berücksichtigung beider Slots und vorhandener Anlagensteuerung prüfen. Dieses Feature verändert keine HMI-Kommandos oder PLC-Feedbackfelder.
 - Lieferabschluss in der Fabriksimulation dokumentieren; keine Kundenzustellung behaupten.
 
-Kann der PLC-Vertrag eine benötigte Unterscheidung nicht liefern, wird der konkrete fehlende Nachweis dokumentiert und der zugehörige Lauf geprüft. Eine fehlende Beobachtung darf nicht durch eine angenommene Erfolgsmeldung ersetzt werden.
+Ohne passenden Endstatus oder bei widersprüchlicher Auftragsidentität bleibt der Lauf prüfbedürftig. Ein korreliertes `StatusMES=5` löst die Prüfung auf; falls die Steuerung bereits auf Idle (`StatusMES=0`) zurückgesetzt wurde und ein Abschlusszeitpunkt gespeichert ist, wird der abgeschlossene Lauf ebenfalls freigegeben. Fehlende oder unbekannte Einzelstatuscodes werden als erfolgreich gezählt.
 
 ## Tests und Abnahme
 
@@ -202,7 +203,7 @@ Backendtests für Domäne, Repository, Services, Migration, API, Client, Gateway
 - Backendregression mit isoliertem PostgreSQL: **130 Passed**, einschließlich Migration, separatem Wiederanlaufprozess, konkurrierender Annahme/Reservierung/Review, Führung, Timeout, Resultatcommit und Teilreset.
 - Playwright: **22 Passed** bei 1440×1000 und 390×844; beide Auftragsseiten, Dashboard, Keyboard-Review, Versionskonflikt, idempotenter Retry, Mengenvalidierung, API-Ausfall/Veraltung, Filter und echter Next-HTTP-Proxy.
 - Frontendbuild, TypeScript und geänderte/neue Dateien in ESLint erfolgreich; Screenshots der Seiten, des Dashboards und des Prüfdialogs visuell geprüft.
-- Reale PLC-Abnahme und Prüfung auf Projektgeräten bleiben offen. Die Spec bleibt deshalb `Modified`; Starts bleiben ohne explizite Vertragsfreigabe gesperrt.
+- Weitere PLC-Abnahmen und Prüfung auf Projektgeräten bleiben offen. Die Spec bleibt deshalb `Modified`; neue Starts benötigen PLC-Bereitschaft und dürfen keinen offenen Review übergehen.
 
 ## Angepasste Methoden
 
@@ -217,7 +218,7 @@ Die folgenden Verantwortlichkeiten bilden die tatsächliche Implementierung ab. 
 | dieselbe Datei / `OrderRepository` | `source_success`, `source_failure` | Nur erfolgreiches Lesen erneuert Aktualität; Fehler bewahren letzte Beobachtung. | AC-33 bis AC-36 |
 | `backend/app/repositories/worker_leadership.py` / `WorkerLeadership` | `_invoke`, `_acquire_sync`, `acquire`, `assert_owned`, `_release_sync`, `close` | Dedizierte PostgreSQL-Session mit Advisory-Lock; der Lock wird erst nach auslaufendem PLC-I/O freigegeben. | AC-16, AC-20, AC-21 |
 | `backend/app/services/order_admission_service.py` / `OrderAdmissionService` | `accept` | Gibt dauerhafte Annahme samt Laufreferenz zurück. `202` beweist weder PLC-Start noch Abschluss. | AC-12, AC-14, AC-18, AC-19 |
-| `backend/app/services/order_dispatch_service.py` / `OrderDispatchService` | `tick`, `_readiness_reason`, `_start` | Ein gemeinsamer FIFO-Dispatch prüft beide Slots, Vertragsfreigabe und Reservierung; speichert Startunsicherheit vor dem Schreiben. | AC-16, AC-17, AC-20 bis AC-24 |
+| `backend/app/services/order_dispatch_service.py` / `OrderDispatchService` | `tick`, `_readiness_reason`, `_start` | Ein gemeinsamer FIFO-Dispatch prüft beide Slots und Reservierung; speichert Startunsicherheit vor dem Schreiben. | AC-16, AC-17, AC-20 bis AC-24 |
 | dieselbe Datei / `OrderDispatchService` | `_continue`, `_continue_reviewed`, `_continue_reset`, `_acknowledge`, `_check_timeout` | Ergebnisse vor Reset sichern, Teilreset anhand gespeicherter Fakten fortführen, Timeout reserviert lassen und manuelle Bewertung ohne Reset weiterbeobachten. | AC-13, AC-21 bis AC-24, AC-30, AC-39 |
 | `backend/app/services/product_result_service.py` / `ProductResultService` | `observe`, `_observe_phase`, `_observe_results`, `_check_manual_totals` | Typ/Nummer und geplante Einheitenidentität zuordnen, finale Ergebnisse idempotent speichern, unbekannte Codes unbekannt lassen. Spätere PLC-Widersprüche erhalten die Fakten und setzen neuen Prüfbedarf. | AC-07 bis AC-11, AC-31 bis AC-33, AC-39 |
 | `backend/app/services/order_recovery_service.py` / `OrderRecoveryService` | `reconcile` | Beweisbar ungeschriebene Vorbereitung zurückstellen, aktiven korrelierten Lauf erhalten, fehlenden Nachweis manuell prüfen lassen. | AC-20 bis AC-26 |

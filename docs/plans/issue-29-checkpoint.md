@@ -27,7 +27,7 @@ Stand: 2026-10-13. Nach der Pause wieder aufgenommen; lokale Softwareimplementie
 1. Vor Änderungen Status/Branch, Spec und Harness lesen. Nicht neu implementieren.
 2. Rein lesend echte Produktstatusfelder, finale Codes und Produkt-/Serien-/Sequenzidentitäten beider Slots bestätigen. Synthetische Tests 11/12 sind kein Live-Vertrag.
 3. Vor-/Nach-Reset-Lebenszyklus und globale Anlagenbereitschaft einschließlich fremder/HMI-Läufe prüfen. Der Reset löscht MES-Produkteingaben, dann Anzahl, dann MES-Kommando; gespeicherte Ergebnisse bleiben erhalten.
-4. Erst nach dokumentiertem Vertrag `OPC_UA_CONTRACT_VERIFIED` und echte `OPC_UA_PRODUCT_RESULTS` passend setzen. Standard bleibt false/{}.
+4. Ein korrelierter PLC-Abschluss gilt als erfolgreich. `OPC_UA_PRODUCT_RESULTS` nur setzen, wenn echte Statuscodes bestätigt sind; unbekannte/fehlende Einzelcodes werden als Erfolg angenommen.
 5. Reale Produktion und Lieferung nacheinander abnehmen: Mengenvergleich, kurze Läufe, Ausfall/Neustart, Reviewblocking und FIFO. Erwartete/tatsächliche Werte dokumentieren.
 6. Projektgeräte/Tastatur/Zoom prüfen. Erst nach allen erforderlichen Nachweisen Spec auf `Implemented` setzen.
 

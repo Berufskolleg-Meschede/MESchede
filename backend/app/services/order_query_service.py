@@ -41,7 +41,7 @@ class OrderQueryService:
             good = run.manual_good_quantity
         if run.manual_error_quantity is not None:
             failed = run.manual_error_quantity
-        origin = "mixed" if manual and run.result_observed else "manual" if manual else "plc" if run.result_observed else "unknown"
+        origin = "mixed" if manual and run.result_observed else "manual" if manual else "completion" if run.completion_assumed else "plc" if run.result_observed else "unknown"
         return good, failed, origin
 
     def _view(self, stored: StoredOrder, source: SourceStatus, position: int | None) -> OrderView:

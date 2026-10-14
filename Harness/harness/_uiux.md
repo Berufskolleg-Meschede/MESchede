@@ -292,6 +292,13 @@ The following is agreed target behavior for issue #29; it does not change the cu
 
 ## Completion checklist for UI changes
 
+Issue #29 completion displays mapped successful and failed unit results. A
+correlated completed PLC order assumes success for missing or unmapped unit
+signals and does not require a manual review. Keep the quantity origin visible
+when the UI labels assumed success. If a stored completion is already at PLC
+idle after a manual command reset, show it as completed and clear the stale
+review notice.
+
 Before considering a UI or UX change complete:
 
 - The screen follows the industrial minimal direction and central tokens.

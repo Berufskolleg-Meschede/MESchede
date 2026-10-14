@@ -16,7 +16,7 @@ class OrderDispatchService:
     """Reserviert genau einen Anlagenlauf und sichert Ergebnisse vor dem Reset."""
 
     def __init__(self, repository: OrderRepository, gateway: PlcGateway, settings: OrderSettings, leadership) -> None:
-        """Übernimmt Persistenz, PLC-Verbindung, geprüften Vertrag und Führungsnachweis."""
+        """Übernimmt Persistenz, PLC-Verbindung, Resultatzuordnung und Führungsnachweis."""
         self.repository = repository
         self.gateway = gateway
         self.settings = settings
@@ -39,9 +39,7 @@ class OrderDispatchService:
             await self._start(reserved)
 
     def _readiness_reason(self, observations: dict[OrderType, PlcSnapshot]) -> str | None:
-        """Verlangt einen freigegebenen Vertrag und Bereitschaft beider Slots."""
-        if not self.settings.contract_verified:
-            return "Der PLC-Vertrag ist noch nicht bestätigt; neue Starts sind gesperrt."
+        """Verlangt aktuelle Bereitschaft beider PLC-Auftragsslots."""
         if len(observations) != len(OrderType):
             return "Die PLC-Bereitschaft ist nicht für beide Auftragsarten bekannt."
         if not all(snapshot.ready for snapshot in observations.values()):
@@ -76,6 +74,9 @@ class OrderDispatchService:
             await self._continue_reviewed(stored, observation)
             return
         if observation is None:
+            if phase in {RunPhase.COMPLETION_OBSERVED, RunPhase.AWAITING_RESET} or stored.run.ended_at is not None:
+                await asyncio.to_thread(self.repository.block, "Der Abschluss ist gespeichert; warte auf PLC-Rückmeldung für den Reset.")
+                return
             await asyncio.to_thread(self.repository.require_review, stored.run.id, "Die PLC-Rückmeldung ist nicht verfügbar.")
             return
         if not stored.run.review_required and phase == RunPhase.AWAITING_RESET:
@@ -85,9 +86,6 @@ class OrderDispatchService:
         if not can_continue:
             return
         if observation.status == 5:
-            if not self.settings.contract_verified:
-                await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der PLC-Abschlussvertrag ist nicht geprüft.")
-                return
             await self._acknowledge(stored, observation)
         elif phase == RunPhase.RUNNING and observation.ready:
             await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der Lauf ging ohne Endnachweis auf Idle zurück.")
@@ -115,6 +113,9 @@ class OrderDispatchService:
     async def _acknowledge(self, stored: StoredOrder, observation: PlcSnapshot) -> None:
         """Quittiert erst nach dem bereits committed Ergebnisnachweis."""
         if observation.command != 1:
+            if stored.run.ended_at is not None and observation.status == 5:
+                await asyncio.to_thread(self.repository.block, "Der Auftrag ist abgeschlossen; warte auf PLC-Idle.")
+                return
             if stored.run.phase != RunPhase.AWAITING_RESET.value:
                 await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der Abschluss wurde außerhalb des gesicherten MES-Resets quittiert.")
             return

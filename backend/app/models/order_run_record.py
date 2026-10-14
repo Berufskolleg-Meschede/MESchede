@@ -20,6 +20,7 @@ class OrderRunRecord(SQLModel, table=True):
     review_reason: str | None = None
     last_observed_status: int | None = None
     result_observed: bool = False
+    completion_assumed: bool = False
     manual_good_quantity: int | None = None
     manual_error_quantity: int | None = None
     has_manual_review: bool = False

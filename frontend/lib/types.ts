@@ -74,7 +74,7 @@ export interface OrderRunView {
   good_quantity: number | null
   error_quantity: number | null
   result_complete: boolean
-  quantity_source: 'plc' | 'manual' | 'mixed' | 'unknown'
+  quantity_source: 'plc' | 'completion' | 'manual' | 'mixed' | 'unknown'
   review_required: boolean
   review_reason: string | null
   has_manual_review: boolean

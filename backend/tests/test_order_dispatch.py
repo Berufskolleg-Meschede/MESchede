@@ -34,10 +34,9 @@ def test_production_and_delivery_complete_in_global_fifo_order(order_repository,
     assert all(item.run.phase == RunPhase.COMPLETED.value for item in order_repository.snapshot().orders)
 
 
-def test_unverified_contract_never_writes_start(order_repository, order_payload):
+def test_ready_order_starts_without_a_product_result_mapping(order_repository, order_payload):
     order_repository.admit(OrderType.PRODUCTION, order_payload())
     gateway = SimulatedGateway()
     service = OrderDispatchService(order_repository, gateway, OrderSettings(rest_buffer_s=0), FakeLeadership())
     asyncio.run(service.tick(gateway.snapshots))
-    assert gateway.events == []
-    assert order_repository.snapshot().dispatch.blocked_reason
+    assert gateway.events == [("start", OrderType.PRODUCTION, 1)]

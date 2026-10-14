@@ -46,14 +46,15 @@ def test_repeated_product_results_do_not_increment_quantities(order_repository, 
     assert current.result_complete
 
 
-def test_unverified_codes_do_not_fabricate_good_or_failed_quantities(order_repository, order_payload):
+def test_completed_order_assumes_success_when_result_codes_are_unmapped(order_repository, order_payload):
     stored = running_order(order_repository, order_payload())
     settings = OrderSettings()
     ProductResultService(order_repository, settings).observe(stored.run.id, finished_snapshot(order_repository))
     view = OrderQueryService(order_repository, settings).detail(OrderType.PRODUCTION, "test-1")
-    assert view.good_quantity is None and view.error_quantity is None
+    assert (view.good_quantity, view.error_quantity, view.processed_quantity) == (2, 0, 2)
     assert view.status == "completed"
-    assert not view.result_complete
+    assert view.result_complete
+    assert view.quantity_source == "completion"
 
 
 def test_foreign_order_does_not_change_product_results(order_repository, order_payload):
