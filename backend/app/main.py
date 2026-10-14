@@ -9,10 +9,12 @@ from dataclasses import replace
 from fastapi import FastAPI
 
 from app.clients.plc_order_gateway import PlcOrderGateway
+from app.clients.plc_storage_gateway import PlcStorageGateway
 from app.db.db import async_session_factory
 from app.repositories.order_repository import OrderRepository
 from app.routers import storage_router, productionorders_router, deliveryorders_router, orders_router, settings_router
 from app.routers.analytics_router import router as analytics_router
+from app.routers.plc_storage_router import router as plc_storage_router
 from app.services import settings_service
 from app.services.analytics import mark_interrupted_runs_unknown
 from app.settings import OrderSettings
@@ -25,7 +27,7 @@ logging.basicConfig(level=logging.INFO)
 logging.getLogger("opcua").setLevel(logging.WARNING)
 
 
-def create_app(worker: OrderWorkerHost | None = None) -> FastAPI:
+def create_app(worker: OrderWorkerHost | None = None, storage_gateway: PlcStorageGateway | None = None) -> FastAPI:
     """Erlaubt isolierte Testabhängigkeiten ohne eine echte PLC-Verbindung."""
 
     @asynccontextmanager
@@ -54,18 +56,25 @@ def create_app(worker: OrderWorkerHost | None = None) -> FastAPI:
         production_queue.bind_worker(host)
         delivery_queue.bind_worker(host)
         start_storage_consumer()
+        gateway = storage_gateway
+        if gateway is None:
+            gateway = PlcStorageGateway(
+                os.getenv("OPC_UA_URL", ""), settings_provider=settings_service.get_current_settings,
+            )
+        application.state.plc_storage_gateway = gateway
         await host.start()
         try:
             yield
         finally:
             await host.stop()
+            await gateway.close()
             stop_storage_consumer()
 
     application = FastAPI(lifespan=lifespan)
     for router in (
         storage_router.router, productionorders_router.router,
         deliveryorders_router.router, orders_router.router, settings_router.router,
-        analytics_router,
+        analytics_router, plc_storage_router,
     ):
         application.include_router(router)
     return application

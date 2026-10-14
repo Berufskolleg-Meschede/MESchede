@@ -20,6 +20,10 @@ const EMPTY_SETTINGS: Settings = {
   opcua_node_auftragssteuerung: '',
   opcua_node_status: '',
   opcua_node_produktqueue_pattern: '',
+  opcua_node_lager_gehaeuse: '',
+  opcua_node_magazin_deckel_1: '',
+  opcua_node_magazin_deckel_2: '',
+  opcua_node_lager_produkte: '',
 }
 
 export function SettingsForm() {

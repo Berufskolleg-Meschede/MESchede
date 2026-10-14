@@ -9,6 +9,7 @@ import {
   type FieldErrorDetail,
   type StorageItem,
   type StorageStatus,
+  type LagerSnapshot,
   type AnalyticsRun,
   type OrderOverview,
   type OrderPageData,
@@ -227,5 +228,9 @@ export const api = {
     status: async (): Promise<StorageStatus> => {
       return apiFetch('/storage/status')
     },
+  },
+
+  plcStorage: {
+    get: async (): Promise<LagerSnapshot> => apiFetch('/plc-storage/'),
   },
 }

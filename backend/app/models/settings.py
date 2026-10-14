@@ -17,6 +17,11 @@ DEFAULT_AUFTRAGSSTEUERUNG_NODE = "Auftragssteuerung_MES"
 DEFAULT_STATUS_NODE = "StatusMES"
 DEFAULT_PRODUKTQUEUE_PATTERN = "Produktqueue[{index}]"
 
+DEFAULT_LAGER_GEHAEUSE_NODE = "LagerGehaeuse"
+DEFAULT_MAGAZIN_DECKEL_1_NODE = "MagazinDeckel_1"
+DEFAULT_MAGAZIN_DECKEL_2_NODE = "MagazinDeckel_2"
+DEFAULT_LAGER_PRODUKTE_NODE = "LagerProdukte"
+
 _NODE_NAME_FIELDS = (
     "opcua_node_production_order",
     "opcua_node_delivery_order",
@@ -25,6 +30,10 @@ _NODE_NAME_FIELDS = (
     "opcua_node_feedback",
     "opcua_node_auftragssteuerung",
     "opcua_node_status",
+    "opcua_node_lager_gehaeuse",
+    "opcua_node_magazin_deckel_1",
+    "opcua_node_magazin_deckel_2",
+    "opcua_node_lager_produkte",
 )
 
 
@@ -42,6 +51,13 @@ class SettingsBase(SQLModel):
     opcua_node_auftragssteuerung: str = Field(default=DEFAULT_AUFTRAGSSTEUERUNG_NODE)
     opcua_node_status: str = Field(default=DEFAULT_STATUS_NODE)
     opcua_node_produktqueue_pattern: str = Field(default=DEFAULT_PRODUKTQUEUE_PATTERN)
+
+    # Lagerknoten für die Lagerbestandsseite; feste Rollen, editierbare Browse-Namen
+    # wie bei den Auftragsknoten oben.
+    opcua_node_lager_gehaeuse: str = Field(default=DEFAULT_LAGER_GEHAEUSE_NODE)
+    opcua_node_magazin_deckel_1: str = Field(default=DEFAULT_MAGAZIN_DECKEL_1_NODE)
+    opcua_node_magazin_deckel_2: str = Field(default=DEFAULT_MAGAZIN_DECKEL_2_NODE)
+    opcua_node_lager_produkte: str = Field(default=DEFAULT_LAGER_PRODUKTE_NODE)
 
     @field_validator(*_NODE_NAME_FIELDS)
     @classmethod
