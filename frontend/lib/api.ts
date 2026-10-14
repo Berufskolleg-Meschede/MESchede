@@ -57,29 +57,7 @@ const MOCK_MACHINES: Machine[] = [
   { id: 4, name: 'Bohrwerk B', type: 'Bohranlage', status: 'online' },
 ]
 
-const MOCK_STORAGE: StorageItem[] = [
-  { id: 1, quantity: 120, article_id: 1, updated_at: null, article: MOCK_ARTICLES[0] },
-  { id: 2, quantity: 45, article_id: 2, updated_at: null, article: MOCK_ARTICLES[1] },
-  { id: 3, quantity: 0, article_id: 3, updated_at: null, article: MOCK_ARTICLES[2] },
-  { id: 4, quantity: 230, article_id: 4, updated_at: null, article: MOCK_ARTICLES[3] },
-]
-
 let mockIdCounter = 100
-
-let MOCK_SETTINGS: Settings = {
-  opcua_node_production_order: 'MESAuftragProduktion',
-  opcua_node_delivery_order: 'MESAuftragKommissionieren',
-  polling_interval_ms: 500,
-  opcua_node_kopf: 'Kopf',
-  opcua_node_inhalt: 'Inhalt',
-  opcua_node_feedback: 'Feedback',
-  opcua_node_auftragssteuerung: 'Auftragssteuerung_MES',
-  opcua_node_status: 'StatusMES',
-  opcua_node_produktqueue_pattern: 'Produktqueue[{index}]',
-}
-
-const MIN_POLLING_INTERVAL_MS = 100
-const MAX_POLLING_INTERVAL_MS = 10_000
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -115,33 +93,6 @@ async function buildApiError(res: Response, path: string): Promise<ApiValidation
 
 function resolveArticle(article_id: number): Article | undefined {
   return MOCK_ARTICLES.find(a => a.id === article_id)
-}
-
-const REQUIRED_NODE_NAME_FIELDS: (keyof Settings)[] = [
-  'opcua_node_production_order', 'opcua_node_delivery_order',
-  'opcua_node_kopf', 'opcua_node_inhalt', 'opcua_node_feedback',
-  'opcua_node_auftragssteuerung', 'opcua_node_status',
-]
-
-function validateMockSettingsOrThrow(data: Settings): void {
-  const fieldErrors: Record<string, string> = {}
-  for (const field of REQUIRED_NODE_NAME_FIELDS) {
-    if (!String(data[field]).trim()) {
-      fieldErrors[field] = 'Knotenname darf nicht leer sein.'
-    }
-  }
-  if (!data.opcua_node_produktqueue_pattern.trim()) {
-    fieldErrors.opcua_node_produktqueue_pattern = 'Namensmuster darf nicht leer sein.'
-  } else if (!data.opcua_node_produktqueue_pattern.includes('{index}')) {
-    fieldErrors.opcua_node_produktqueue_pattern = 'Namensmuster muss den Platzhalter {index} enthalten.'
-  }
-  if (data.polling_interval_ms < MIN_POLLING_INTERVAL_MS || data.polling_interval_ms > MAX_POLLING_INTERVAL_MS) {
-    fieldErrors.polling_interval_ms =
-      `Abfrageintervall muss zwischen ${MIN_POLLING_INTERVAL_MS} und ${MAX_POLLING_INTERVAL_MS} Millisekunden liegen.`
-  }
-  if (Object.keys(fieldErrors).length > 0) {
-    throw new ApiValidationError('Ungültige Eingabe.', fieldErrors)
-  }
 }
 
 // ── API object ────────────────────────────────────────────────────────────────
@@ -263,28 +214,16 @@ export const api = {
   },
 
   settings: {
-    get: async (): Promise<Settings> => {
-      if (USE_MOCK) return { ...MOCK_SETTINGS }
-      return apiFetch('/settings/')
-    },
-    update: async (data: Settings): Promise<Settings> => {
-      if (USE_MOCK) {
-        validateMockSettingsOrThrow(data)
-        MOCK_SETTINGS = { ...data }
-        return { ...MOCK_SETTINGS }
-      }
-      return apiFetch('/settings/', {
+    get: async (): Promise<Settings> => apiFetch('/settings/'),
+    update: async (data: Settings): Promise<Settings> =>
+      apiFetch('/settings/', {
         method: 'PUT',
         body: JSON.stringify(data),
-      })
-    },
+      }),
   },
 
   storage: {
-    list: async (): Promise<StorageItem[]> => {
-      if (USE_MOCK) return [...MOCK_STORAGE]
-      return apiFetch('/storage/')
-    },
+    list: async (): Promise<StorageItem[]> => apiFetch('/storage/'),
     status: async (): Promise<StorageStatus> => {
       return apiFetch('/storage/status')
     },
