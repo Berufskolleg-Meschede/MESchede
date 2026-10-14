@@ -17,7 +17,7 @@ def pytest_addoption(parser):
 
 
 @pytest.fixture
-def order_engine(request):
+def isolated_postgres_engine(request):
     """Verwendet ausschließlich die explizite Test-URL, niemals die Projekt-env-Dateien."""
     url = request.config.getoption("--order-test-db-url") or os.getenv("TEST_ORDER_DATABASE_URL")
     if not url:
@@ -27,9 +27,6 @@ def order_engine(request):
     with admin.begin() as connection:
         connection.execute(text(f'CREATE SCHEMA "{schema}"'))
     engine = create_engine(url, connect_args={"options": f"-csearch_path={schema}"})
-    names = {"mes_order", "order_run", "product_unit", "run_review", "dispatch_state", "plc_source_state"}
-    tables = [table for table in SQLModel.metadata.sorted_tables if table.name in names]
-    SQLModel.metadata.create_all(engine, tables=tables)
     try:
         yield engine
     finally:
@@ -37,6 +34,16 @@ def order_engine(request):
         with admin.begin() as connection:
             connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         admin.dispose()
+
+
+@pytest.fixture
+def order_engine(isolated_postgres_engine):
+    """Erzeugt nur die Auftragsdomäne im isolierten Schema."""
+    engine = isolated_postgres_engine
+    names = {"mes_order", "order_run", "product_unit", "run_review", "dispatch_state", "plc_source_state"}
+    tables = [table for table in SQLModel.metadata.sorted_tables if table.name in names]
+    SQLModel.metadata.create_all(engine, tables=tables)
+    return engine
 
 
 @pytest.fixture

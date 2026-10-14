@@ -134,6 +134,7 @@ class OrderPageView(BaseModel):
 
     orders: list[OrderView]
     total: int
+    filtered_total: int
     offset: int
     limit: int
     active: list[OrderView]

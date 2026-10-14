@@ -191,11 +191,18 @@ class OrderRepository:
         with self.transaction() as session:
             state = self.lock_state(session)
             run = self.load_run(session, run_id)
-            if not run.review_required or run.review_reason != reason:
-                self.change_phase(run, RunPhase.REVIEW_REQUIRED)
-                run.review_required = True
-                run.review_reason = reason
-                state.blocked_reason = "Ein Lauf muss geprüft werden."
+            self.mark_review(run, state, reason)
+
+    def mark_review(self, run: OrderRunRecord, state: DispatchStateRecord, reason: str) -> None:
+        """Markiert Unsicherheit atomar zusammen mit neu belegten Produktresultaten."""
+        if not run.review_required or run.review_reason != reason:
+            previous_version = run.version
+            self.change_phase(run, RunPhase.REVIEW_REQUIRED)
+            if run.version == previous_version:
+                run.version += 1
+            run.review_required = True
+            run.review_reason = reason
+        state.blocked_reason = "Ein Lauf muss geprüft werden."
 
     def block(self, reason: str | None) -> None:
         """Setzt Quellen-/Bereitschaftssperren, ohne offene Reviews zu entfernen."""

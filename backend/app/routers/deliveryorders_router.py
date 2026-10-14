@@ -16,11 +16,13 @@ router = APIRouter(prefix="/deliveryorder", tags=["deliveryorder"])
 @router.get("/", response_model=OrderPageView)
 async def list_deliveryorders(
     offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=200),
+    search: str = Query("", max_length=200),
+    status: str | None = Query(None, pattern="^(pending|in_progress|error|completed|review_required)$"),
     worker: OrderWorkerHost = Depends(get_order_worker),
 ):
     """Liefert Lieferaufträge ohne Verwechslung mit gleich nummerierten Produktionsaufträgen."""
     query = OrderQueryService(worker.repository, worker.settings)
-    return await execute_order_operation(lambda: query.page(OrderType.DELIVERY, worker.running, offset, limit))
+    return await execute_order_operation(lambda: query.page(OrderType.DELIVERY, worker.running, offset, limit, search, status))
 
 
 @router.get("/queue-status")

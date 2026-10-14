@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from app.clients.plc_order_gateway import PlcOrderGateway
 from app.repositories.order_repository import OrderRepository
-from app.routers import sites_router, storage_router, productionorders_router, deliveryorders_router, orders_router
+from app.routers import storage_router, productionorders_router, deliveryorders_router, orders_router
 from app.settings import OrderSettings
 from app.workers import production_queue, delivery_queue
 from app.workers.order_worker_host import OrderWorkerHost
@@ -43,7 +43,7 @@ def create_app(worker: OrderWorkerHost | None = None) -> FastAPI:
 
     application = FastAPI(lifespan=lifespan)
     for router in (
-        sites_router.router, storage_router.router, productionorders_router.router,
+        storage_router.router, productionorders_router.router,
         deliveryorders_router.router, orders_router.router,
     ):
         application.include_router(router)

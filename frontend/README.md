@@ -1,42 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MESchede Frontend
 
-## Getting Started
+Next.js-App mit den vorhandenen Seiten `/dashboard`, `/production-orders` und `/delivery-orders`. Das Dashboard fasst beide Auftragsarten lesend zusammen. Die Auftragsseiten zeigen Warteschlange, Lauf und Produkteinheiten getrennt und bieten die manuelle Prüfung unklarer Läufe.
 
-First, run the development server:
+## Lokal starten
 
 ```bash
 npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Im normalen Betrieb kommen die Auftragsdaten ausschließlich vom FastAPI-Backend. Der serverseitige Proxy `/api/mes/*` verwendet `MES_BACKEND_URL`, standardmäßig `http://127.0.0.1:8000`. Eine Vorlage steht in `.env.example`; bei Bedarf nach `.env.local` kopieren. Im Produktions-Compose wird `http://backend:8000` gesetzt. Browser benötigen nur Zugriff auf das Frontend.
 
-The home page redirects to the dashboard. Production and delivery orders are
-available from the sidebar. The frontend currently uses in-memory demo data
-(`USE_MOCK` in `lib/api.ts`), so it runs without the backend. Demo changes reset
-when the page is refreshed.
+Bei API-Ausfall bleiben letzte Daten mit Fehler-/Aktualitätshinweis sichtbar. Ohne erste Daten erscheinen unbekannte Werte; es gibt keinen automatischen Demodaten-Fallback. Ein Browserreload entfernt keine dauerhaft gespeicherten Reviews. Manuelle Erstellung und Auslösung bleiben Issue 30.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Die Oberfläche verwendet Systemschriften und benötigt beim Start/Build keinen Fontdownload.
 
-The interface uses system fonts, so starting and building the frontend does not require downloading fonts.
+## Vorhandene UI mit Testdaten ansehen
 
-## Learn More
+```bash
+npm run dev:preview
+```
 
-To learn more about Next.js, take a look at the following resources:
+Unter [http://127.0.0.1:3030](http://127.0.0.1:3030) erscheint die vorhandene UI mit sechs gekennzeichneten Testaufträgen. Enthalten sind ein prüfbedürftiger Lauf, globale Warteschlange, vollständige/teilweise/unbekannte Mengen sowie abgeschlossene und unterbrochene Beispiele.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Die Vorschau braucht Node.js 22.14 oder neuer, verwendet natives Type-Stripping und startet ihren lokalen Datenserver auf `127.0.0.1:18030`. Kein zusätzlicher Paketdownload, Backend, PostgreSQL oder IoT-Netz nötig. Der Starter setzt die API-Adresse ausschließlich für seinen eigenen Frontendprozess; keine env-Datei wird geändert.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Der Hinweis **Testdaten-Vorschau · simulierte Aufträge** erscheint auf allen Seiten. **Testdaten zurücksetzen** stellt den Anfangszustand wieder her. Bewertungen bleiben über Browserreload erhalten, verschwinden jedoch beim Zurücksetzen oder Beenden des Vorschauprozesses. Neue Starts und Anlagenbereitschaft werden nicht simuliert.
 
-## Deploy on Vercel
+Mit `Ctrl+C` werden Frontend und Testdatenserver gemeinsam beendet. Der normale Start `npm run dev` verwendet die echte Backendadresse. Der Vorschauhinweis wird nur im expliziten Entwicklungsmodus gerendert, nicht im Produktionsbuild.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+`npm run test:preview` prüft Speicher, Idempotenz, Konflikte, Suche und die Vorschau im Desktop-/schmalen Browser.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Prüfen
+
+```bash
+npm run build
+npx playwright install chromium
+npm run test:e2e
+```
+
+Playwright startet ausschließlich lokale Testserver auf `127.0.0.1:3029` und `127.0.0.1:18029`. Browserfixtures sind im Testordner und sprechen keine PLC an. Desktop- und schmale Layouts prüfen getrennte Queues, Reload, Tastatur, Review ohne Notiz, Konflikte, idempotente Wiederholung, Quellenfehler, Backendfilter und den echten Next-HTTP-Proxy. Testartefakte liegen ignoriert unter `test-results/`.
+
+ESLint wird gemäß Harness nur für tatsächlich geänderte TS-/TSX-Dateien ausgeführt. Die Nachweise und die noch ausstehende Anlagenabnahme stehen in [der Feature-Spezifikation](../docs/specs/issue-29-order-production-overview.md).

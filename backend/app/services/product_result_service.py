@@ -15,10 +15,10 @@ class ProductResultService:
         self.repository = repository
         self.settings = settings
 
-    def observe(self, run_id: str, snapshot: PlcSnapshot) -> None:
+    def observe(self, run_id: str, snapshot: PlcSnapshot) -> bool:
         """Speichert Identität, belegten Laufzustand und verfügbare finale Resultate atomar."""
         with self.repository.transaction() as session:
-            self.repository.lock_state(session)
+            state = self.repository.lock_state(session)
             run = self.repository.load_run(session, run_id)
             order = session.get(MesOrderRecord, run.order_ref)
             if order is None or order.order_type != snapshot.order_type.value or order.plc_order_number != snapshot.order_number:
@@ -27,7 +27,8 @@ class ProductResultService:
                 raise OrderConflict("Der PLC-Laufstatus ist nicht zugeordnet. Bitte den Lauf prüfen.")
             self._observe_phase(run, snapshot)
             if snapshot.status == 5 and self.settings.contract_verified and self.settings.product_results:
-                self._observe_results(run, self.repository.load_units(session, run_id), snapshot)
+                self._observe_results(run, state, self.repository.load_units(session, run_id), snapshot)
+            return not run.review_required
 
     def _observe_phase(self, run, snapshot: PlcSnapshot) -> None:
         """Beobachtet Start und Ende, ohne eine offene Operatorprüfung zu übergehen."""
@@ -45,9 +46,11 @@ class ProductResultService:
         if snapshot.status == 5 and run.phase in {RunPhase.START_PENDING.value, RunPhase.RUNNING.value}:
             self.repository.change_phase(run, RunPhase.COMPLETION_OBSERVED)
 
-    def _observe_results(self, run, units: list, snapshot: PlcSnapshot) -> None:
+    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot) -> None:
         """Übernimmt Endresultate nur bei passender geplanter Einheitenidentität."""
         observations = {item.index: item for item in snapshot.products}
+        if len(observations) != len(snapshot.products) or any(index < 0 or index >= len(units) for index in observations):
+            raise OrderConflict("Die PLC-Produktqueue besitzt keine eindeutige geplante Zuordnung.")
         changed = False
         for unit in units:
             observation = observations.get(unit.queue_index)
@@ -64,17 +67,18 @@ class ProductResultService:
             if (unit.result, unit.raw_status, unit.error_code) != values:
                 unit.result, unit.raw_status, unit.error_code = values
                 changed = True
-        if observations and not run.result_observed:
+        if any(unit.result is not None for unit in units) and not run.result_observed:
             run.result_observed = True
             changed = True
         if changed:
             run.version += 1
-        self._check_manual_totals(run, units)
+        self._check_manual_totals(run, state, units)
 
-    def _check_manual_totals(self, run, units: list) -> None:
+    def _check_manual_totals(self, run, state, units: list) -> None:
         """Erhält manuelle Bewertungen; spätere Widersprüche benötigen eine erneute Prüfung."""
         complete = all(unit.result is not None for unit in units)
         for result, manual in (("good", run.manual_good_quantity), ("failed", run.manual_error_quantity)):
             actual = sum(unit.result == result for unit in units)
             if manual is not None and (actual > manual or complete and actual != manual):
-                raise OrderConflict("Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung.")
+                self.repository.mark_review(run, state, "Neue PLC-Ergebnisse widersprechen der manuellen Mengenbewertung.")
+                return

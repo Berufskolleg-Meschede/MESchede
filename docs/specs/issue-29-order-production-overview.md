@@ -5,7 +5,7 @@
 - **Typ:** Feature-Spezifikation
 - **State:** Modified
 - **Stand:** 2026-10-13
-- **Review:** Vom Benutzer am 2026-10-13 fachlich bestätigt; noch nicht implementiert.
+- **Review:** Vom Benutzer am 2026-10-13 fachlich bestätigt; Software umgesetzt und lokal geprüft, echte PLC-Vertragsprüfung/Anlagenabnahme offen.
 - **Implementierungsplan:** [Schrittweiser Plan mit OOP-Verantwortlichkeiten](../plans/issue-29-order-production-overview.md)
 - **Issue:** [#29 – Auftrags- und Produktionsübersicht](https://github.com/Berufskolleg-Meschede/MESchede/issues/29)
 - **Idee:** [Harness-Idee](../../Harness/harness/ideas/I1%20Auftrags-%20und%20Produktionsuebersicht%20Issue%2029.md)
@@ -188,22 +188,61 @@ Kann der PLC-Vertrag eine benötigte Unterscheidung nicht liefern, wird der konk
 
 ## Tests und Abnahme
 
-Der [Harness-Testkatalog](../../Harness/harness/_unittest.md) erfasst den geplanten Testbedarf mit dieser Spec und ihren AC-IDs. Testnamen und neue Dateipfade werden erst aus der tatsächlichen Implementierung übernommen.
+Der [Harness-Testkatalog](../../Harness/harness/_unittest.md) verknüpft tatsächliche Backend-/Browsertests mit dieser Spec und ihren AC-IDs. PostgreSQL-Integration nutzt nur explizite Testdatenbanken und zufällige eigene Schemas; Browserdaten sind auf Testfixtures begrenzt.
 
 - Unit-/Verhaltenstests: Korrelation, Doppelzählung, unbekannte Resultate, FIFO, gegenseitiger Startausschluss, Sperrregeln und Reviewvalidierung.
 - Integrationsprüfungen: PostgreSQL-Persistenz über Prozessneustart, Unterbrechung zwischen Startschreiben und Bestätigung, konkurrierende API-/Reviewaufrufe und API-/PLC-Ausfall.
 - UI-Prüfungen: Datenzustände, Demokennzeichnung, Review ohne Pflichtnotiz, Dashboard ohne Mutation, Tastatur und Projektgeräte.
 - Anlagenabnahme: mindestens ein realer Produktions- und ein realer Lieferauftrag bis zu korrelierten Endresultaten; Fehler-/Unterbrechungs-/Wiederanlauffälle mit protokollierten erwarteten und tatsächlichen Ergebnissen.
 
-Vorhandene Backendtests für Client, Handshake und Workerdiagnosen dienen als Regressionseinstieg, belegen dieses Feature aber noch nicht. Diese Spec erhält erst `Implemented`, wenn Code, Tests und erforderliche Abnahmen nachweislich übereinstimmen. Nicht ausgeführte Anlagenprüfungen bleiben ausdrücklich offen.
+Backendtests für Domäne, Repository, Services, Migration, API, Client, Gateway und Workerdiagnosen sowie Browserprüfungen sind implementiert und lokal erfolgreich ausgeführt. Diese Spec erhält erst `Implemented`, wenn Code, Tests und erforderliche Abnahmen nachweislich übereinstimmen. Nicht ausgeführte Anlagenprüfungen bleiben ausdrücklich offen.
+
+### Lokaler Nachweisstand – 2026-10-13
+
+- Backendregression mit isoliertem PostgreSQL: **130 Passed**, einschließlich Migration, separatem Wiederanlaufprozess, konkurrierender Annahme/Reservierung/Review, Führung, Timeout, Resultatcommit und Teilreset.
+- Playwright: **22 Passed** bei 1440×1000 und 390×844; beide Auftragsseiten, Dashboard, Keyboard-Review, Versionskonflikt, idempotenter Retry, Mengenvalidierung, API-Ausfall/Veraltung, Filter und echter Next-HTTP-Proxy.
+- Frontendbuild, TypeScript und geänderte/neue Dateien in ESLint erfolgreich; Screenshots der Seiten, des Dashboards und des Prüfdialogs visuell geprüft.
+- Reale PLC-Abnahme und Prüfung auf Projektgeräten bleiben offen. Die Spec bleibt deshalb `Modified`; Starts bleiben ohne explizite Vertragsfreigabe gesperrt.
 
 ## Angepasste Methoden
 
-Noch keine Anwendungscodeänderungen. Tatsächliche Methoden, Verantwortungen und Erkenntnisse werden bei der Implementierung dokumentiert.
+Die folgenden Verantwortlichkeiten bilden die tatsächliche Implementierung ab. Records und DTOs halten Daten; Fachlogik liegt in Services, HTTP-/PLC-/DB-Nebeneffekte an getrennten Grenzen. `OrderWorkerHost` ist der implementierte Name des im Plan zunächst `OrderRuntime` genannten Lebenszyklusobjekts.
+
+| Datei / Typ | Tatsächliche Methoden | Aufgabe, Änderung und Erkenntnis | Bezug |
+| --- | --- | --- | --- |
+| `backend/app/domain/order_run.py` / `OrderRun` | `transition_to`, `status` | Erlaubt nur belegbare Laufübergänge; Ende ist unabhängig von Produktqualität, Idle ist kein Endnachweis. | AC-06, AC-12, AC-13 |
+| `backend/app/repositories/order_repository.py` / `OrderRepository` | `transaction`, `initialize`, `lock_state`, `load_run`, `load_units` | Kurzlebige Sessions je Thread, gleiche Lockreihenfolge und idempotente Koordination. Keine DB-Transaktion bleibt während PLC-Wartezeit offen. | AC-14 bis AC-16, AC-40 |
+| dieselbe Datei / `OrderRepository` | `admit`, `_check_plc_number`, `_create_units`, `reserve_next` | Normalisierte Annahme, globale Sequenz, identischer Retry ohne zweiten Lauf und Reservierung vor Start. Nummernwiederverwendung je Typ bleibt bis zur sicheren Generationsidentität ausgeschlossen. | AC-14 bis AC-20 |
+| dieselbe Datei / `OrderRepository` | `snapshot`, `change_phase`, `transition`, `require_review`, `mark_review`, `block`, `release_completed`, `return_prepared_to_queue` | Konsistenter Read-only-Snapshot, dauerhafte Sperre und versionsgeschützte Übergänge. Neue Fakten und widersprechender Prüfbedarf können atomar gespeichert werden. | AC-20 bis AC-26, AC-33, AC-39, AC-40 |
+| dieselbe Datei / `OrderRepository` | `source_success`, `source_failure` | Nur erfolgreiches Lesen erneuert Aktualität; Fehler bewahren letzte Beobachtung. | AC-33 bis AC-36 |
+| `backend/app/repositories/worker_leadership.py` / `WorkerLeadership` | `_invoke`, `_acquire_sync`, `acquire`, `assert_owned`, `_release_sync`, `close` | Dedizierte PostgreSQL-Session mit Advisory-Lock; der Lock wird erst nach auslaufendem PLC-I/O freigegeben. | AC-16, AC-20, AC-21 |
+| `backend/app/services/order_admission_service.py` / `OrderAdmissionService` | `accept` | Gibt dauerhafte Annahme samt Laufreferenz zurück. `202` beweist weder PLC-Start noch Abschluss. | AC-12, AC-14, AC-18, AC-19 |
+| `backend/app/services/order_dispatch_service.py` / `OrderDispatchService` | `tick`, `_readiness_reason`, `_start` | Ein gemeinsamer FIFO-Dispatch prüft beide Slots, Vertragsfreigabe und Reservierung; speichert Startunsicherheit vor dem Schreiben. | AC-16, AC-17, AC-20 bis AC-24 |
+| dieselbe Datei / `OrderDispatchService` | `_continue`, `_continue_reviewed`, `_continue_reset`, `_acknowledge`, `_check_timeout` | Ergebnisse vor Reset sichern, Teilreset anhand gespeicherter Fakten fortführen, Timeout reserviert lassen und manuelle Bewertung ohne Reset weiterbeobachten. | AC-13, AC-21 bis AC-24, AC-30, AC-39 |
+| `backend/app/services/product_result_service.py` / `ProductResultService` | `observe`, `_observe_phase`, `_observe_results`, `_check_manual_totals` | Typ/Nummer und geplante Einheitenidentität zuordnen, finale Ergebnisse idempotent speichern, unbekannte Codes unbekannt lassen. Spätere PLC-Widersprüche erhalten die Fakten und setzen neuen Prüfbedarf. | AC-07 bis AC-11, AC-31 bis AC-33, AC-39 |
+| `backend/app/services/order_recovery_service.py` / `OrderRecoveryService` | `reconcile` | Beweisbar ungeschriebene Vorbereitung zurückstellen, aktiven korrelierten Lauf erhalten, fehlenden Nachweis manuell prüfen lassen. | AC-20 bis AC-26 |
+| `backend/app/services/run_review_service.py` / `RunReviewService` | `review`, `_validate_quantities`, `_view` | Request-ID und Version prüfen, nullable Ganzzahlmengen ohne Notiz speichern und keine PLC-Abhängigkeit besitzen. | AC-27 bis AC-32, AC-40 |
+| `backend/app/services/order_query_service.py` / `OrderQueryService` | `_source`, `_quantities`, `_view`, `_summary`, `_snapshot_views`, `overview`, `page`, `detail` | Gemeinsame DTOs aus gespeicherten Fakten; Filter vor Pagination, globale Wartepositionen/Reviews, manuelle Gesamtsummen ohne Addition zu PLC-Fakten und unabhängiger Quellenzustand. | AC-01 bis AC-11, AC-25, AC-26, AC-31 bis AC-37 |
+| `backend/app/clients/plc_order_gateway.py` / `PlcOrderGateway` | `_invoke`, `_root`, `_optional_value`, `_read_sync`, `read`, `write`, `acknowledge`, `_disconnect`, `reconnect`, `close` | Ein I/O-Thread, Snapshotvergleich von Nummer/Anzahl/Status/Kommando vor/nach Lesen, unverfügbare Felder nullable. Reset prüft Identität unmittelbar vor Schreiben; Cancel wartet begonnenes I/O ab. | AC-08 bis AC-10, AC-20, AC-21, AC-33, AC-39 |
+| `backend/app/clients/opc_ua_client.py` / `OpcUaClient` | `read_anzahl`, `write_anzahl`, `clear_product_queue`, `write_order` | Alle exponierten MES-Eingabeslots typgeprüft löschen/zurücklesen; Anzahl vor Resetkommando null. Eingaben vor Start zurücklesen, Start zuletzt; HMI-/Feedbackfelder unverändert. | AC-21, AC-24, AC-39 |
+| `backend/app/workers/plc_handshake.py` | `wait_for_plc_ready`, `wait_for_plc_done` | Legacy-Helfer sind rein beobachtend; kein blinder Reset ohne persistierte Zuordnung und Resultatcommit. Der neue Dispatcher übernimmt den vollständigen Ablauf. | AC-10, AC-20, AC-39 |
+| `backend/app/workers/order_worker_host.py` / `OrderWorkerHost` | `running`, `start`, `_finished`, `_run`, `_observe`, `_recover`, `_fail_active`, `stop`, `diagnostics` | Ein Task für beide Typen, unabhängige Quellen, Recovery vor Dispatch, sichtbare Fehler und Cleanup in Gateway-vor-Führung-Reihenfolge. | AC-14 bis AC-26, AC-33, AC-34 |
+| `backend/app/main.py` | `create_app`, `lifespan` | Injizierbare Zusammensetzung und gemeinsamer Lifecycle. Nicht vorhandenen `sites_router` nicht importieren; Legacy-Modelle registrieren Mapperbeziehungen, ohne fachfremde Migration. | AC-01 bis AC-04, AC-14, AC-16 |
+| `backend/app/db/db.py` | `get_engine`, `init_db`, `get_session` | Asynchrone Legacy-Engine erst bei tatsächlichem Zugriff erzeugen; injizierte Test-App lädt keine Projekt-DB-Konfiguration. | Isolierte Verifikation |
+| `backend/alembic/env.py` und neue Revision `7a92c04e31bf` | `run_migrations_online`, `upgrade`, `downgrade` | Explizite isolierte Testverbindung; sechs neue Tabellen, Seedzustand, bestehende Maschinen-/Benutzerdaten erhalten. Migration deaktiviert bestehende Logger nicht. | AC-14 bis AC-19 |
+| Produktions-/Lieferrouter, `orders_router.py`, `order_dependencies.py` | `list_productionorders`, `get_productionorder`, `post_productionorder`, `list_deliveryorders`, `get_deliveryorder`, `post_deliveryorder`, `get_order_overview`, `post_run_review`, `get_production_queue_status`, `get_delivery_queue_status`, `get_order_worker`, `execute_order_operation` | Dauerhafte Annahme und reine Lese-/Reviewzugänge, String-IDs, stabile 404/409/422/503-Fehler; Diagnoserouten vor dynamischen Pfaden. | AC-01 bis AC-04, AC-18, AC-19, AC-27 bis AC-30, AC-37 |
+| `frontend/lib/api.ts` / `OrderApiClient` | `request`, `list`, `detail`, `overview`, `review` | Echte API, injizierbarer Fetch, verständliche HTTP-Fehler, keine Demodaten bei Ausfall. | AC-01 bis AC-04, AC-27 bis AC-32, AC-37 |
+| `frontend/app/api/mes/[...path]/route.ts` | `forward` | Serverseitige Zieladresse, begrenzte Auftragsrouten, korrekter Backend-Listenpfad trotz Next-Slashnormalisierung, unveränderte Payload/Status und no-store. | AC-01 bis AC-04, AC-27 bis AC-30, AC-37 |
+| `frontend/hooks/use-order-snapshot.ts` | `useOrderSnapshot`, `refresh` | Sequenzielle Abfragen, Abort bei Wechsel/Unmount, keine verspäteten Filterantworten, letzte Daten und Alter bei Fehlern erhalten. | AC-25, AC-26, AC-33 bis AC-37 |
+| Frontend-Auftragskomponenten | `OrdersSection`, `OrderList`, `OrderFilters`, `OrderRows`, `WaitingOrders`, `RunSummary`, `ProductQueue`, `OrderPageFeedback`, `OrderSourceStatus`, `OrderDispatchNotice`, `StatusBadge` | Bestehende Seiten und Tabellen wiederverwenden, Warteschlange/Produkte trennen, globale Prüfung verlinken, Textstatus, unbekannte/manuelle/unvollständige Mengen und Datenzustände anzeigen. | AC-01, AC-02, AC-05 bis AC-11, AC-25, AC-26, AC-31 bis AC-38 |
+| `frontend/components/run-review-dialog.tsx` | `parseQuantity`, `RunReviewDialog`, `refreshRun`, `save` | Kein Pflichttext, kontrollierte Mengen, Versionsbasis beim Öffnen, explizite Aktualisierung bei Konflikt, gleiche Request-ID bei unsicherem Retry, keine Doppelspeicherung während Request. | AC-27 bis AC-32, AC-38, AC-40 |
+| `frontend/app/dashboard/page.tsx` | `DashboardPage` | Kombiniert Backendzusammenfassungen und Quellen; Links zu Prüfungen, keine Review-/Auftragsmutation. | AC-03, AC-04, AC-25, AC-31 bis AC-38 |
+
+Der konkrete Testkatalog nennt die einzelnen Verhaltens-/Integrations-/Browserprüfungen. Triviale Konstruktoren/Recordfelder enthalten keine zusätzlichen fachlichen Nebenwirkungen.
 
 ## UI-/UX-Erkenntnisse
 
-Die vereinbarte Richtung ist in [Harness UI/UX](../../Harness/harness/_uiux.md#issue-29-agreed-order-overview-and-recovery) ergänzt. Sie beschreibt Soll-Verhalten, keinen bereits erreichten Integrationsstand.
+Die vereinbarte Richtung ist in [Harness UI/UX](../../Harness/harness/_uiux.md#issue-29-agreed-order-overview-and-recovery) ergänzt. Sie beschreibt den erreichten lokalen Softwarestand und trennt die noch offene Hardware-/Projektgeräteabnahme davon.
 
 ## Quellen und Beziehungen
 
@@ -217,7 +256,8 @@ Die vereinbarte Richtung ist in [Harness UI/UX](../../Harness/harness/_uiux.md#i
 
 ## Noch festzulegen beziehungsweise nachzuweisen
 
-- Polling-/Veraltungswerte, DTO-Namen und API-Form sind im verlinkten Implementierungsplan als technische Entwurfsentscheidungen konkretisiert; vor Live-Abnahme prüfen.
+- Polling standardmäßig 0,5 s, UI 2 s, stale nach 10 s; Werte, Zeitlimits und API-Form sind implementiert und in `backend/.env.example`/`frontend/README.md` dokumentiert. Vor Live-Abnahme passend zur Anlage prüfen.
+- PLC-Auftragsnummern sind je Typ konservativ eindeutig; sichere Wiederverwendung erfordert einen zusätzlichen Generationsnachweis.
 - PLC-Vertragsnachweise und reale Testfälle gemäß obiger Verifikationsliste.
 - Verfügbare Projektgeräte für responsive und Tastaturabnahme.
-- Fachlicher Review abgeschlossen; Implementierungsplan erstellt. Umsetzung und Nachweise folgen als separate Phase.
+- Software, lokale PostgreSQL-Integration und Browserprüfung sind umgesetzt. Ohne IoT-Netz wurde keine echte PLC kontaktiert oder ein Anlagenlauf durchgeführt.

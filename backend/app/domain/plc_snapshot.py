@@ -28,8 +28,9 @@ class PlcSnapshot:
     status: int
     observed_at: datetime
     products: tuple[ProductObservation, ...] = ()
+    product_count: int = 0
 
     @property
     def ready(self) -> bool:
         """Belegt Idle anhand von Kommando und MES-Feedback gemeinsam."""
-        return self.command == 0 and self.status == 0
+        return self.command == 0 and self.status == 0 and self.product_count == 0

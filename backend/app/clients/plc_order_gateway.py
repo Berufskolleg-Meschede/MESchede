@@ -1,6 +1,7 @@
 """Geordnete PLC-Zugriffe über die vorhandene OPC-UA-Implementierung."""
 
 import asyncio
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Protocol
@@ -9,6 +10,9 @@ from app.clients.opc_ua_client import OpcUaClient
 from app.domain.order_run import OrderType
 from app.domain.plc_snapshot import PlcSnapshot, ProductObservation
 from app.models.mes_auftrag import MESAuftrag
+
+
+logger = logging.getLogger(__name__)
 
 
 class PlcGateway(Protocol):
@@ -22,7 +26,7 @@ class PlcGateway(Protocol):
         """Schreibt vorbereitete Eingabedaten und zuletzt den Startbefehl."""
         ...
 
-    async def acknowledge(self, kind: OrderType) -> None:
+    async def acknowledge(self, kind: OrderType, expected_order_number: int) -> None:
         """Quittiert einen bereits dauerhaft gesicherten Abschluss."""
         ...
 
@@ -53,6 +57,8 @@ class PlcOrderGateway:
     def _root(self, kind: OrderType):
         """Verbindet und löst beide bekannten Slotnamen auf dem I/O-Thread auf."""
         if self.client is None:
+            if not self.url:
+                raise ValueError("Die OPC-UA-Adresse ist nicht konfiguriert.")
             self.client = OpcUaClient(self.url)
             try:
                 self.client.client.connect()
@@ -65,8 +71,11 @@ class PlcOrderGateway:
                     OrderType.PRODUCTION: self.client._get_child(database, "MESAuftragProduktion"),
                     OrderType.DELIVERY: self.client._get_child(database, "MESAuftragKommissionieren"),
                 }
-            except BaseException:
-                self._disconnect()
+            except Exception:
+                try:
+                    self._disconnect()
+                except Exception:
+                    logger.warning("Die fehlgeschlagene OPC-UA-Verbindung konnte nicht getrennt werden.", exc_info=True)
                 raise
         return self.roots[kind]
 
@@ -83,9 +92,11 @@ class PlcOrderGateway:
         root = self._root(kind)
         header = self.client._get_child(root, "Kopf")
         number = self.client._get_child(header, "Auftragsnummer").get_value()
+        initial_status = self.client.read_status_mes(root)
+        initial_command = self.client.read_auftragssteuerung(root)
         content = self.client._get_child(root, "Inhalt")
         count = self.client._get_child(content, "Anzahl").get_value()
-        if not isinstance(count, int) or not 0 <= count <= 255:
+        if isinstance(count, bool) or not isinstance(count, int) or not 0 <= count <= 255:
             raise ValueError("Die PLC liefert eine ungültige Produktanzahl.")
         products = []
         for index in range(count):
@@ -97,9 +108,13 @@ class PlcOrderGateway:
             ))
         status = self.client.read_status_mes(root)
         command = self.client.read_auftragssteuerung(root)
-        if self.client._get_child(header, "Auftragsnummer").get_value() != number:
-            raise ValueError("Die PLC-Auftragsnummer änderte sich während der Beobachtung.")
-        return PlcSnapshot(kind, number, command, status, datetime.now(timezone.utc), tuple(products))
+        final_count = self.client.read_anzahl(root)
+        final_number = self.client._get_child(header, "Auftragsnummer").get_value()
+        if (final_number, final_count, status, command) != (number, count, initial_status, initial_command):
+            raise ValueError("Der PLC-Auftragszustand änderte sich während der Beobachtung.")
+        if any(isinstance(value, bool) or not isinstance(value, int) for value in (number, status, command)):
+            raise ValueError("Die PLC liefert ungültige Auftrags- oder Statuswerte.")
+        return PlcSnapshot(kind, number, command, status, datetime.now(timezone.utc), tuple(products), count)
 
     async def read(self, kind: OrderType) -> PlcSnapshot:
         """Liest den Slot ohne Schreibzugriff auf MES-, HMI- oder Feedbackwerte."""
@@ -113,11 +128,20 @@ class PlcOrderGateway:
             self.client.write_order(root, payload, 1 if kind == OrderType.PRODUCTION else 4)
         await self._invoke(operation)
 
-    async def acknowledge(self, kind: OrderType) -> None:
-        """Schreibt nur das MES-Kommando eines verifizierten beendeten Auftrags."""
+    async def acknowledge(self, kind: OrderType, expected_order_number: int) -> None:
+        """Löscht MES-Eingaben und Anzahl vor dem abschließenden Resetkommando."""
         def operation():
             """Quittiert den passenden Slot ohne Änderung an HMI oder Feedback."""
             root = self._root(kind)
+            header = self.client._get_child(root, "Kopf")
+            if self.client._get_child(header, "Auftragsnummer").get_value() != expected_order_number:
+                raise ValueError("Die PLC-Auftragsidentität änderte sich vor dem Reset.")
+            if self.client.read_status_mes(root) != 5 or self.client.read_auftragssteuerung(root) != 1:
+                raise ValueError("Der PLC-Abschluss ist vor dem Reset nicht mehr bestätigt.")
+            self.client.clear_product_queue(root)
+            self.client.write_anzahl(root, 0)
+            if self.client.read_anzahl(root) != 0:
+                raise ValueError("Die PLC-Produktanzahl wurde beim Reset nicht auf null bestätigt.")
             self.client.write_auftragssteuerung(root, 0)
         await self._invoke(operation)
 

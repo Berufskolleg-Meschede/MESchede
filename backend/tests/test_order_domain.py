@@ -41,3 +41,11 @@ def test_review_rejects_non_integer_or_negative_quantities(quantity):
         ReviewRequest(
             request_id=uuid4(), expected_version=1, outcome="completed", good_quantity=quantity,
         )
+
+
+@pytest.mark.parametrize('interval',[float('nan'),float('inf'),0,-1])
+def test_invalid_observation_intervals_are_rejected(interval):
+    """Polling darf weder unendlich warten noch die PLC ohne Pause abfragen."""
+    from app.settings import OrderSettings
+    with pytest.raises(ValueError):
+        OrderSettings(poll_interval_s=interval)

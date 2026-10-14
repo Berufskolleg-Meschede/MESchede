@@ -38,7 +38,7 @@ services:
     container_name: MES-Frontend
     restart: unless-stopped
     environment:
-      BACKEND_INTERNAL_URL: http://MES-API:8000
+      MES_BACKEND_URL: http://backend:8000
     networks:
       - SmartFactory
     labels:

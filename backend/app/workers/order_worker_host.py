@@ -124,7 +124,7 @@ class OrderWorkerHost:
 
     async def stop(self) -> None:
         """Stoppt die Auswahl; ein laufender I/O-Aufruf wird vom Gateway vor Lockfreigabe beendet."""
-        if self.task is None:
+        if self.task is None or self.task.done():
             return
         self.task.cancel()
         try:

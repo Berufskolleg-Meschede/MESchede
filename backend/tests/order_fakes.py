@@ -63,17 +63,19 @@ class SimulatedGateway:
             11 if index == 0 else 12, 0 if index == 0 else 7,
         ) for index, item in enumerate(payload.inhalt.Produktqueue))
         self.snapshots[kind] = PlcSnapshot(kind, payload.kopf.Auftragsnummer, 1, 1,
-                                            datetime.now(timezone.utc), products)
+                                            datetime.now(timezone.utc), products, len(products))
 
-    async def acknowledge(self, kind):
+    async def acknowledge(self, kind, expected_order_number):
         """Belegt vor Reset bereits persistierte Endresultate."""
         assert self.snapshots[kind].status == 5
+        assert self.snapshots[kind].order_number == expected_order_number
         if self.repository is not None:
-            stored = next(item for item in self.repository.snapshot().orders if item.order.order_type == kind.value)
+            snapshot = self.repository.snapshot()
+            stored = next(item for item in snapshot.orders if item.run.id == snapshot.dispatch.active_run_id)
             assert stored.run.ended_at is not None
             assert all(unit.result is not None for unit in stored.units)
         self.events.append(("ack", kind))
-        self.snapshots[kind] = replace(self.snapshots[kind], command=0, status=0)
+        self.snapshots[kind] = replace(self.snapshots[kind], command=0, status=0, products=(), product_count=0)
 
     async def close(self):
         """Erhält einen prüfbaren Shutdownnachweis ohne Socketzugriff."""

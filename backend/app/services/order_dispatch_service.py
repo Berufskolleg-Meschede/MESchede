@@ -71,14 +71,18 @@ class OrderDispatchService:
             await asyncio.to_thread(self.repository.transition, stored.run.id, RunPhase.COMPLETED)
             await asyncio.to_thread(self.repository.release_completed, stored.run.id)
             return
-        if not stored.run.review_required and phase in {RunPhase.COMPLETED, RunPhase.INTERRUPTED}:
-            await asyncio.to_thread(self.repository.block, "Der Lauf ist bewertet; die Anlage ist noch nicht bereit.")
         observation = observations.get(OrderType(stored.order.order_type))
+        if not stored.run.review_required and phase in {RunPhase.COMPLETED, RunPhase.INTERRUPTED}:
+            await self._continue_reviewed(stored, observation)
+            return
         if observation is None:
             await asyncio.to_thread(self.repository.require_review, stored.run.id, "Die PLC-Rückmeldung ist nicht verfügbar.")
             return
-        await asyncio.to_thread(self.results.observe, stored.run.id, observation)
-        if stored.run.review_required:
+        if not stored.run.review_required and phase == RunPhase.AWAITING_RESET:
+            await self._continue_reset(stored, observation)
+            return
+        can_continue = await asyncio.to_thread(self.results.observe, stored.run.id, observation)
+        if not can_continue:
             return
         if observation.status == 5:
             if not self.settings.contract_verified:
@@ -90,14 +94,34 @@ class OrderDispatchService:
         else:
             await self._check_timeout(stored)
 
+    async def _continue_reviewed(self, stored: StoredOrder, observation: PlcSnapshot | None) -> None:
+        """Beobachtet spätere Fakten ohne einen Reset aus der Bewertung abzuleiten."""
+        await asyncio.to_thread(self.repository.block, "Der Lauf ist bewertet; die Anlage ist noch nicht bereit.")
+        if observation is not None and observation.order_number == stored.order.plc_order_number and observation.status == 5:
+            await asyncio.to_thread(self.results.observe, stored.run.id, observation)
+
+    async def _continue_reset(self, stored: StoredOrder, observation: PlcSnapshot) -> None:
+        """Verwendet gesicherte Resultate, wenn Eingabeidentitäten schon gelöscht sein können."""
+        if observation.order_number != stored.order.plc_order_number:
+            await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der Abschlussreset gehört nicht mehr zum gespeicherten Auftrag.")
+        elif observation.status == 5:
+            await self._acknowledge(stored, observation)
+            await self._check_timeout(stored)
+        elif observation.status != 0:
+            await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der PLC-Status widerspricht dem bereits gesicherten Abschluss.")
+        else:
+            await self._check_timeout(stored)
+
     async def _acknowledge(self, stored: StoredOrder, observation: PlcSnapshot) -> None:
         """Quittiert erst nach dem bereits committed Ergebnisnachweis."""
         if observation.command != 1:
+            if stored.run.phase != RunPhase.AWAITING_RESET.value:
+                await asyncio.to_thread(self.repository.require_review, stored.run.id, "Der Abschluss wurde außerhalb des gesicherten MES-Resets quittiert.")
             return
         if stored.run.phase not in {RunPhase.AWAITING_RESET.value, RunPhase.COMPLETED.value, RunPhase.INTERRUPTED.value}:
             await asyncio.to_thread(self.repository.transition, stored.run.id, RunPhase.AWAITING_RESET)
         await self.leadership.assert_owned()
-        await self.gateway.acknowledge(OrderType(stored.order.order_type))
+        await self.gateway.acknowledge(OrderType(stored.order.order_type), stored.order.plc_order_number)
 
     async def _check_timeout(self, stored: StoredOrder) -> None:
         """Lässt einen Timeout nicht als Abschluss oder Anlass für einen Doppelstart gelten."""
