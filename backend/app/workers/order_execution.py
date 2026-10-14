@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from functools import partial
 
 from ..clients.execution import OpcUaConnectionError
@@ -71,7 +72,7 @@ class PlcSession:
                 await asyncio.sleep(RECONNECT_DELAY_S)
 
 
-async def execute_order(session, order, send_order, diagnostics, worker_logger, kind):
+async def execute_order(session, order, send_order, diagnostics, worker_logger, kind, on_started=None, on_completed=None):
     previous_order_ack = plc_handshake.CompletedOrderAcknowledgement()
     readiness = partial(plc_handshake.wait_for_plc_ready, acknowledgement=previous_order_ack)
     await session.wait(readiness, 600.0, diagnostics, "waiting_for_plc_ready")
@@ -89,10 +90,15 @@ async def execute_order(session, order, send_order, diagnostics, worker_logger, 
         worker_logger.warning("Order %s: write outcome uncertain; observing PLC feedback, not resending", order.order_id)
         await session.close()
     started_status = await session.wait(plc_handshake.wait_for_plc_started, 30.0, diagnostics, "waiting_for_plc_started")
+    if started_status == 1 and on_started is not None:
+        await asyncio.to_thread(on_started, datetime.now(timezone.utc))
     if started_status != 5:
         await session.wait(plc_handshake.wait_for_plc_finished, 600.0, diagnostics, "waiting_for_completion")
+    completed_at = datetime.now(timezone.utc)
     # Preserve the completion already observed even if feedback changes. The
     # stateful acknowledgement clears queue, count, then command, and checks idle
     # after that. Lost replies are checked by readback, never by awaiting 5 again.
     acknowledgement = plc_handshake.CompletedOrderAcknowledgement()
     await session.wait(acknowledgement, 30.0, diagnostics, "waiting_for_reset")
+    if on_completed is not None:
+        await asyncio.to_thread(on_completed, completed_at)

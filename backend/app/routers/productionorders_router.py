@@ -1,7 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, status
 
 from ..workers import production_queue
 from ..workers.production_queue import ProductionOrderPayload
+from ..services.analytics import register_run
 
 router = APIRouter(prefix="/productionorder", tags=["productionorder"])
 
@@ -18,6 +21,7 @@ async def post_productionorder(payload: ProductionOrderPayload):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Production worker is not running; check /productionorder/queue-status and restart the backend.",
         )
+    payload._analytics_run_id = await asyncio.to_thread(register_run, "production", payload)
     await production_queue.order_queue.put(payload)
     production_queue.logger.info("Production order %s: accepted into queue", payload.order_id)
     return {

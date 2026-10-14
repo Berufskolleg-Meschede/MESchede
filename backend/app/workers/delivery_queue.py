@@ -5,7 +5,7 @@ from functools import partial
 from typing import Optional
 
 from dotenv import load_dotenv
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, PrivateAttr, field_validator
 
 from ..clients.opc_ua_client import OpcUaClient
 from ..clients.execution import run_opc
@@ -13,13 +13,27 @@ from .order_execution import PlcSession, execute_order
 from ..models.mes_auftrag import MESAuftrag
 from ..services.settings_service import get_current_settings
 from .diagnostics import WorkerDiagnostics
+from ..services.analytics import (
+    observe_run_completed,
+    observe_run_error,
+    observe_run_started,
+)
 
 logger = logging.getLogger(__name__)
 
 
 class DeliveryOrderPayload(BaseModel):
-    order_id: str
+    order_id: str = Field(min_length=1, max_length=128)
     mes_auftrag: MESAuftrag
+    _analytics_run_id: int | None = PrivateAttr(default=None)
+
+    @field_validator("order_id")
+    @classmethod
+    def strip_order_id(cls, value: str) -> str:
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("order_id darf nicht leer sein.")
+        return normalized
 
 
 delivery_queue: asyncio.Queue = asyncio.Queue()
@@ -110,7 +124,11 @@ async def _worker_loop() -> None:
                 node_name = get_current_settings().opcua_node_delivery_order
                 _diagnostics.phase = "discovering_nodes"
                 await session.select_order_root(partial(_get_root_node, node_name=node_name))
-                await execute_order(session, order, _send_order, _diagnostics, logger, "Delivery")
+                await execute_order(
+                    session, order, _send_order, _diagnostics, logger, "Delivery",
+                    on_started=lambda observed_at: observe_run_started(order._analytics_run_id, observed_at),
+                    on_completed=lambda observed_at: observe_run_completed(order._analytics_run_id, observed_at),
+                )
                 _diagnostics.last_completed_order_id = order.order_id
                 _diagnostics.last_error = None
                 logger.info("Delivery order %s completed; PLC reset confirmed", order.order_id)
@@ -121,6 +139,9 @@ async def _worker_loop() -> None:
                 raise
             except Exception as error:
                 _diagnostics.last_error = f"{type(error).__name__}: {error}"
+                await asyncio.to_thread(
+                    observe_run_error, order._analytics_run_id, type(error).__name__
+                )
                 logger.exception("Delivery order %s failed", order.order_id)
                 await session.close()
             finally:

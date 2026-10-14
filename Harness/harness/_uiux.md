@@ -108,6 +108,7 @@ The stylesheet also contains light-theme fallback tokens. A complete light-theme
 | `/dashboard` | Übersicht | Operational overview |
 | `/production-orders` | Fertigungsaufträge | Production order management |
 | `/delivery-orders` | Lieferaufträge | Delivery order management |
+| `/analytics` | Analysen | Observed production and delivery runs, quantities, and durations |
 
 The dashboard page title is **Betriebsübersicht**. The brand is **MESchede**, with a small **MES** descriptor and **Berufskolleg Meschede** below it.
 
@@ -131,6 +132,10 @@ Production and delivery IDs may overlap. Keep the area visible and use a composi
 Machine rows show name, technical ID, type, and a readable online/offline status. Display the online count as a fraction, such as `3 / 4`.
 
 The current **Geplante Stückzahlen** section sums quantities from all production orders by article, including completed orders, and explicitly says **Summe aller Fertigungsaufträge je Artikel**. This is an aggregate of order quantities, not a measure of remaining work, actual output, throughput, or completion. Rename it or change its calculation if the intended meaning changes.
+
+## Analytics behavior
+
+The analytics page lists persisted production and delivery runs separately and filters them by date range and order type. Show planned and actual quantities in distinct columns. Compute processed units from confirmed good plus defective results only; if either result is unknown, display the result as unknown. Never substitute planned quantity for produced quantity. Derive elapsed duration from observed start and end timestamps only. For a run that has an observed start but no end, show an explicitly provisional duration; without a start observation, show duration as unknown.
 
 Quantity bars are thin, static, and subdued (`#98aaa0` on a secondary surface). Visible article names and quantities must communicate the data without requiring the bars. Do not add donuts, gauges, or animated charts merely to decorate the dashboard.
 

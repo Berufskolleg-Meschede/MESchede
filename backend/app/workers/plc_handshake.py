@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+from datetime import datetime, timezone
+from typing import Callable
 
 from ..clients.opc_ua_client import OpcUaClient
 from ..clients.execution import run_opc
@@ -95,11 +97,16 @@ async def wait_for_plc_done(
     root_node,
     timeout_s: float = 600.0,
     reset_timeout_s: float = 30.0,
-) -> None:
+    on_completion: Callable[[datetime], None] | None = None,
+) -> datetime:
     # Status 0 immediately after a start command is not completion. Only the
     # PLC's feedback 5 authorizes acknowledging the finished order.
     await wait_for_plc_finished(opc_client, root_node, timeout_s)
+    completed_at = datetime.now(timezone.utc)
+    if on_completion is not None:
+        await asyncio.get_running_loop().run_in_executor(None, on_completion, completed_at)
     await CompletedOrderAcknowledgement()(opc_client, root_node, reset_timeout_s)
+    return completed_at
 
 
 async def wait_for_plc_finished(opc_client, root_node, timeout_s=600.0):

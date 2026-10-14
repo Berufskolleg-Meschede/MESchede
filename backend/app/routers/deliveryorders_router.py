@@ -1,7 +1,10 @@
+import asyncio
+
 from fastapi import APIRouter, HTTPException, status
 
 from ..workers import delivery_queue
 from ..workers.delivery_queue import DeliveryOrderPayload
+from ..services.analytics import register_run
 
 router = APIRouter(prefix="/deliveryorder", tags=["deliveryorder"])
 
@@ -34,6 +37,7 @@ async def post_deliveryorder(payload: DeliveryOrderPayload):
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Delivery worker is not running; check /deliveryorder/queue-status and restart the backend.",
         )
+    payload._analytics_run_id = await asyncio.to_thread(register_run, "delivery", payload)
     delivery_queue.accept_order(payload)
     delivery_queue.logger.info("Delivery order %s: accepted into queue", payload.order_id)
     return {

@@ -143,6 +143,31 @@ number, and reliably signal completed feedback `5`. Do not perform further
 live deliveries until this discrepancy is resolved: a cycling feedback signal
 cannot safely distinguish a real completion from an unrelated transition.
 
+## Product catalog: single source of truth
+
+On October 13, 2026, the team reported that `DB_MES_Schnittstelle` also
+contains a `Produktspezifikationen` array with all product information.
+Use `DB_MES_Schnittstelle.Produktspezifikationen` as the authoritative source
+for the MES product catalog, including product selection and validation.
+
+- Array index `0` is empty and must be skipped when reading the catalog.
+  Product entries start at index `1`.
+- This applies to the product specifications array; the order's
+  `Produktqueue` still starts at index `0` as documented above.
+- The catalog reader is not implemented yet. Before implementing it, inspect
+  the actual OPC UA browse names, fields, array bounds, and product identifiers;
+  do not assume that an array index equals a `ProduktID`.
+
+## Analytics data currently confirmed
+
+The currently documented PLC contract only confirms `StatusMES` values for ready,
+started, and completed states. It does not define a result counter or a per-product
+quality/result field. The MES records the times at which it observes status `1`
+and status `5`; a short order first seen at status `5` has no confirmed start time.
+Until the control group confirms result fields and their meaning, good, defective,
+and processed quantities remain unknown. `Inhalt.Anzahl` and the requested product
+queue describe the plan and must not be treated as produced output.
+
 ## Test on the isolated IoT network
 
 For PLC tests, use the VS Code **Backend (FastAPI, PLC debugging)** launch

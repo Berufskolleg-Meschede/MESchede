@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Factory, Truck, Settings, Package } from 'lucide-react'
+import { LayoutDashboard, Factory, Truck, Settings, Package, ChartLine } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const NAV = [
@@ -10,6 +10,7 @@ const NAV = [
   { href: '/production-orders', label: 'Fertigungsaufträge', icon: Factory },
   { href: '/delivery-orders', label: 'Lieferaufträge', icon: Truck },
   { href: '/inventory', label: 'Lagerbestände', icon: Package },
+  { href: '/analytics', label: 'Analysen', icon: ChartLine },
   { href: '/settings', label: 'Einstellungen', icon: Settings },
 ]
 
