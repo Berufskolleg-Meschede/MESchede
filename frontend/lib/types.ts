@@ -74,6 +74,12 @@ export interface Settings {
   opcua_node_production_order: string
   opcua_node_delivery_order: string
   polling_interval_ms: number
+  opcua_node_kopf: string
+  opcua_node_inhalt: string
+  opcua_node_feedback: string
+  opcua_node_auftragssteuerung: string
+  opcua_node_status: string
+  opcua_node_produktqueue_pattern: string
 }
 
 export interface FieldErrorDetail {

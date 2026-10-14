@@ -54,6 +54,12 @@ async def put_settings(
     current.opcua_node_production_order = payload.opcua_node_production_order
     current.opcua_node_delivery_order = payload.opcua_node_delivery_order
     current.polling_interval_ms = payload.polling_interval_ms
+    current.opcua_node_kopf = payload.opcua_node_kopf
+    current.opcua_node_inhalt = payload.opcua_node_inhalt
+    current.opcua_node_feedback = payload.opcua_node_feedback
+    current.opcua_node_auftragssteuerung = payload.opcua_node_auftragssteuerung
+    current.opcua_node_status = payload.opcua_node_status
+    current.opcua_node_produktqueue_pattern = payload.opcua_node_produktqueue_pattern
 
     session.add(current)
     await session.commit()

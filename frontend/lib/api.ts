@@ -58,6 +58,12 @@ let MOCK_SETTINGS: Settings = {
   opcua_node_production_order: 'MESAuftragProduktion',
   opcua_node_delivery_order: 'MESAuftragKommissionieren',
   polling_interval_ms: 500,
+  opcua_node_kopf: 'Kopf',
+  opcua_node_inhalt: 'Inhalt',
+  opcua_node_feedback: 'Feedback',
+  opcua_node_auftragssteuerung: 'Auftragssteuerung_MES',
+  opcua_node_status: 'StatusMES',
+  opcua_node_produktqueue_pattern: 'Produktqueue[{index}]',
 }
 
 const MIN_POLLING_INTERVAL_MS = 100
@@ -99,13 +105,23 @@ function resolveArticle(article_id: number): Article | undefined {
   return MOCK_ARTICLES.find(a => a.id === article_id)
 }
 
+const REQUIRED_NODE_NAME_FIELDS: (keyof Settings)[] = [
+  'opcua_node_production_order', 'opcua_node_delivery_order',
+  'opcua_node_kopf', 'opcua_node_inhalt', 'opcua_node_feedback',
+  'opcua_node_auftragssteuerung', 'opcua_node_status',
+]
+
 function validateMockSettingsOrThrow(data: Settings): void {
   const fieldErrors: Record<string, string> = {}
-  if (!data.opcua_node_production_order.trim()) {
-    fieldErrors.opcua_node_production_order = 'Zielnode darf nicht leer sein.'
+  for (const field of REQUIRED_NODE_NAME_FIELDS) {
+    if (!String(data[field]).trim()) {
+      fieldErrors[field] = 'Knotenname darf nicht leer sein.'
+    }
   }
-  if (!data.opcua_node_delivery_order.trim()) {
-    fieldErrors.opcua_node_delivery_order = 'Zielnode darf nicht leer sein.'
+  if (!data.opcua_node_produktqueue_pattern.trim()) {
+    fieldErrors.opcua_node_produktqueue_pattern = 'Namensmuster darf nicht leer sein.'
+  } else if (!data.opcua_node_produktqueue_pattern.includes('{index}')) {
+    fieldErrors.opcua_node_produktqueue_pattern = 'Namensmuster muss den Platzhalter {index} enthalten.'
   }
   if (data.polling_interval_ms < MIN_POLLING_INTERVAL_MS || data.polling_interval_ms > MAX_POLLING_INTERVAL_MS) {
     fieldErrors.polling_interval_ms =

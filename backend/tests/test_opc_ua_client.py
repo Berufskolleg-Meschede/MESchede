@@ -171,6 +171,9 @@ def test_read_auftragssteuerung_returns_mes_command():
 
 @pytest.mark.parametrize("name", ["StatusMES", "Status_MES"])
 def test_read_status_mes_reads_feedback(name):
+    # The configured status_node must match exactly; no automatic spelling
+    # fallback is applied now that the name is user-configurable (spec #32
+    # follow-up: structural nodes).
     client = _make_client()
     feedback = _make_mock_node("Feedback")
     feedback.get_children.return_value = [
@@ -180,7 +183,7 @@ def test_read_status_mes_reads_feedback(name):
     root = MagicMock()
     root.get_children.return_value = [feedback]
 
-    assert client.read_status_mes(root) == 5
+    assert client.read_status_mes(root, status_node=name) == 5
 
 
 def test_missing_mes_feedback_is_an_error():
@@ -192,6 +195,44 @@ def test_missing_mes_feedback_is_an_error():
 
     with pytest.raises(KeyError, match="StatusMES"):
         client.read_status_mes(root)
+
+
+# --- configurable structural node names ---
+
+def test_read_auftragssteuerung_resolves_renamed_structural_nodes():
+    client = _make_client()
+    steuerung = _make_mock_node("Steuerung_MES_Custom", value=1)
+    kopf = _make_mock_node("Header")
+    kopf.get_children.return_value = [steuerung]
+    root = MagicMock()
+    root.get_children.return_value = [kopf]
+
+    assert client.read_auftragssteuerung(
+        root, kopf_node="Header", auftragssteuerung_node="Steuerung_MES_Custom"
+    ) == 1
+
+
+def test_write_auftragssteuerung_resolves_renamed_structural_nodes():
+    client = _make_client()
+    steuerung = _make_mock_node("Steuerung_MES_Custom", vtype=ua.VariantType.Byte)
+    kopf = _make_mock_node("Header")
+    kopf.get_children.return_value = [steuerung]
+    root = MagicMock()
+    root.get_children.return_value = [kopf]
+
+    client.write_auftragssteuerung(root, 0, kopf_node="Header", auftragssteuerung_node="Steuerung_MES_Custom")
+
+    steuerung.set_data_value.assert_called_once()
+    assert steuerung.set_data_value.call_args[0][0].Value.Value == 0
+
+
+def test_get_product_queue_item_resolves_a_custom_pattern():
+    client = _make_client()
+    item = _make_mock_node("Slot[0]")
+    inhalt = MagicMock()
+    inhalt.get_children.return_value = [item]
+
+    assert client._get_product_queue_item(inhalt, 0, pattern="Slot[{index}]") is item
 
 
 # --- write_order ---

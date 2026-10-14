@@ -51,7 +51,7 @@ def test_workers_recover_without_replaying_start(monkeypatch, module, queue_name
         async def disconnect(self):
             pass
 
-        def read_status_mes(self, root):
+        def read_status_mes(self, root, feedback_node=None, status_node=None):
             fail_now = ((failure == "idle" and state["command"] == 0)
                         or (failure == "started" and state["command"] == 1 and state["status"] == 0)
                         or (failure == "completion" and state["command"] == 1 and state["status"] == 1))
@@ -62,23 +62,24 @@ def test_workers_recover_without_replaying_start(monkeypatch, module, queue_name
                 state["status"] = 1 if state["status"] == 0 else 5
             return state["status"]
 
-        def read_auftragssteuerung(self, root):
+        def read_auftragssteuerung(self, root, kopf_node=None, auftragssteuerung_node=None):
             return state["command"]
 
-        def read_anzahl(self, root):
+        def read_anzahl(self, root, inhalt_node=None):
             return state["count"]
 
-        def clear_product_queue(self, root):
+        def clear_product_queue(self, root, inhalt_node=None, produktqueue_pattern=None):
             assert state["status"] == 5
 
-        def write_anzahl(self, root, value):
+        def write_anzahl(self, root, value, inhalt_node=None):
             assert value == 0 and state["status"] == 5
             state["count"] = 0
             if failure == "count_response" and not state["failed"]:
                 state["failed"] = True
                 raise concurrent.futures.CancelledError()
 
-        def write_order(self, root, order, kind):
+        def write_order(self, root, order, kind, kopf_node=None, inhalt_node=None,
+                        auftragssteuerung_node=None, produktqueue_pattern=None):
             assert state["status"] == state["command"] == 0
             assert kind == (4 if module is delivery_queue else 1)
             assert len(order.inhalt.Produktqueue) == 1
@@ -89,7 +90,7 @@ def test_workers_recover_without_replaying_start(monkeypatch, module, queue_name
                 state["failed"] = True
                 raise concurrent.futures.CancelledError()
 
-        def write_auftragssteuerung(self, root, command):
+        def write_auftragssteuerung(self, root, command, kopf_node=None, auftragssteuerung_node=None):
             assert command == 0 and state["status"] == 5 and state["count"] == 0
             state["resets"] += 1
             state["command"] = state["status"] = 0
@@ -158,17 +159,17 @@ def test_real_task_cancellation_is_not_reconnected():
 
 def test_uncertain_write_without_started_feedback_is_not_replayed(monkeypatch):
     class IdleClient:
-        def read_status_mes(self, root):
+        def read_status_mes(self, root, feedback_node=None, status_node=None):
             return 0
 
-        def read_auftragssteuerung(self, root):
+        def read_auftragssteuerung(self, root, kopf_node=None, auftragssteuerung_node=None):
             return 0
 
         async def disconnect(self):
             pass
 
     async def immediate_start_timeout(client, root, timeout):
-        await plc_handshake._wait_for_status(client, root, (1, 5), 0, "start")
+        await plc_handshake._wait_for_status(client, root, (1, 5), 0, "start", "Feedback", "StatusMES")
 
     async def scenario():
         from unittest.mock import MagicMock
@@ -213,7 +214,7 @@ def test_transient_completion_clears_count_then_command_without_awaiting_five_ag
         async def disconnect(self):
             pass
 
-        def read_status_mes(self, root):
+        def read_status_mes(self, root, feedback_node=None, status_node=None):
             if state["command"] == 1 and not state["completed"]:
                 state["active_reads"] += 1
                 if state["active_reads"] == (1 if completed_at_start else 2):
@@ -224,13 +225,14 @@ def test_transient_completion_clears_count_then_command_without_awaiting_five_ag
             state["events"].append(("status", state["status"]))
             return state["status"]
 
-        def read_auftragssteuerung(self, root):
+        def read_auftragssteuerung(self, root, kopf_node=None, auftragssteuerung_node=None):
             return state["command"]
 
-        def read_anzahl(self, root):
+        def read_anzahl(self, root, inhalt_node=None):
             return state["count"]
 
-        def write_order(self, root, order, kind):
+        def write_order(self, root, order, kind, kopf_node=None, inhalt_node=None,
+                        auftragssteuerung_node=None, produktqueue_pattern=None):
             assert state["command"] == 0
             state["starts"] += 1
             state["command"] = state["status"] = state["count"] = 1
@@ -240,20 +242,20 @@ def test_transient_completion_clears_count_then_command_without_awaiting_five_ag
                 state["lost"] = True
                 raise concurrent.futures.CancelledError()
 
-        def clear_product_queue(self, root):
+        def clear_product_queue(self, root, inhalt_node=None, produktqueue_pattern=None):
             assert state["completed"]
             if not state["queue_cleared"]:
                 state["events"].append(("queue", 0))
                 state["queue_cleared"] = True
                 self.lose_response("queue")
 
-        def write_anzahl(self, root, value):
+        def write_anzahl(self, root, value, inhalt_node=None):
             assert state["completed"] and state["queue_cleared"] and value == 0
             state["count"] = 0
             state["events"].append(("count", 0))
             self.lose_response("count")
 
-        def write_auftragssteuerung(self, root, value):
+        def write_auftragssteuerung(self, root, value, kopf_node=None, auftragssteuerung_node=None):
             assert state["completed"] and state["count"] == 0 and value == 0
             state["command"] = state["status"] = 0
             state["events"].append(("command", 0))

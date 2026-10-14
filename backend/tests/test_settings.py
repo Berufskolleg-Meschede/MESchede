@@ -62,10 +62,39 @@ def test_defaults_match_the_currently_hardcoded_opc_ua_browse_names():
     assert settings.polling_interval_ms == DEFAULT_POLLING_INTERVAL_MS == 500
 
 
-@pytest.mark.parametrize("field", ["opcua_node_production_order", "opcua_node_delivery_order"])
+def test_defaults_match_the_currently_hardcoded_structural_node_names():
+    settings = Settings()
+    assert settings.opcua_node_kopf == "Kopf"
+    assert settings.opcua_node_inhalt == "Inhalt"
+    assert settings.opcua_node_feedback == "Feedback"
+    assert settings.opcua_node_auftragssteuerung == "Auftragssteuerung_MES"
+    assert settings.opcua_node_status == "StatusMES"
+    assert settings.opcua_node_produktqueue_pattern == "Produktqueue[{index}]"
+
+
+@pytest.mark.parametrize("field", [
+    "opcua_node_production_order", "opcua_node_delivery_order",
+    "opcua_node_kopf", "opcua_node_inhalt", "opcua_node_feedback",
+    "opcua_node_auftragssteuerung", "opcua_node_status",
+])
 def test_empty_or_blank_node_is_rejected(field):
     with pytest.raises(ValidationError):
         SettingsBase(**{field: "   "})
+
+
+def test_produktqueue_pattern_without_index_placeholder_is_rejected():
+    with pytest.raises(ValidationError):
+        SettingsBase(opcua_node_produktqueue_pattern="Produktqueue[0]")
+
+
+def test_produktqueue_pattern_blank_is_rejected():
+    with pytest.raises(ValidationError):
+        SettingsBase(opcua_node_produktqueue_pattern="   ")
+
+
+def test_produktqueue_pattern_is_trimmed():
+    settings = SettingsBase(opcua_node_produktqueue_pattern="  Slot[{index}]  ")
+    assert settings.opcua_node_produktqueue_pattern == "Slot[{index}]"
 
 
 def test_node_value_is_trimmed():
@@ -130,12 +159,25 @@ def test_put_settings_persists_confirmed_values_and_updates_the_cache(monkeypatc
             opcua_node_production_order="Neu",
             opcua_node_delivery_order="NeuLiefer",
             polling_interval_ms=1000,
+            opcua_node_kopf="KopfNeu",
+            opcua_node_inhalt="InhaltNeu",
+            opcua_node_feedback="FeedbackNeu",
+            opcua_node_auftragssteuerung="SteuerungNeu",
+            opcua_node_status="StatusNeu",
+            opcua_node_produktqueue_pattern="SlotNeu[{index}]",
         )
         result = await settings_router.put_settings(payload, session)
 
         assert result.opcua_node_production_order == "Neu"
+        assert result.opcua_node_kopf == "KopfNeu"
+        assert result.opcua_node_inhalt == "InhaltNeu"
+        assert result.opcua_node_feedback == "FeedbackNeu"
+        assert result.opcua_node_auftragssteuerung == "SteuerungNeu"
+        assert result.opcua_node_status == "StatusNeu"
+        assert result.opcua_node_produktqueue_pattern == "SlotNeu[{index}]"
         assert session.committed is True
         assert settings_service.get_current_settings().opcua_node_production_order == "Neu"
+        assert settings_service.get_current_settings().opcua_node_kopf == "KopfNeu"
         assert plc_handshake.POLL_INTERVAL_S == 1.0
 
     asyncio.run(scenario())

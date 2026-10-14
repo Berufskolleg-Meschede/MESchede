@@ -173,4 +173,9 @@ async def _get_root_node(opc_client: OpcUaClient, node_name: str):
 
 
 async def _send_order(opc_client: OpcUaClient, root_node, order: DeliveryOrderPayload) -> None:
-    await run_opc(opc_client.write_order, root_node, order.mes_auftrag, 4)
+    settings = get_current_settings()
+    await run_opc(
+        opc_client.write_order, root_node, order.mes_auftrag, 4,
+        settings.opcua_node_kopf, settings.opcua_node_inhalt,
+        settings.opcua_node_auftragssteuerung, settings.opcua_node_produktqueue_pattern,
+    )

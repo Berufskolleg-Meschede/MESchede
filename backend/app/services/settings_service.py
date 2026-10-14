@@ -11,7 +11,6 @@ from typing import Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models.settings import SETTINGS_ID, Settings
-from ..workers import plc_handshake
 
 logger = logging.getLogger(__name__)
 
@@ -42,4 +41,7 @@ def apply_settings(settings: Settings) -> None:
     """Make newly confirmed settings take effect for subsequent OPC UA access."""
     global _current
     _current = settings
+    # Imported lazily: plc_handshake now reads structural node names via
+    # get_current_settings(), so a module-level import here would cycle back.
+    from ..workers import plc_handshake
     plc_handshake.POLL_INTERVAL_S = settings.polling_interval_ms / 1000

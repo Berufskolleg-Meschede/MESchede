@@ -31,9 +31,9 @@ def test_ready_acknowledges_a_finished_order_left_after_restart():
 
     asyncio.run(plc_handshake.wait_for_plc_ready(client, "root"))
 
-    client.write_auftragssteuerung.assert_called_once_with("root", 0)
-    client.clear_product_queue.assert_called_once_with("root")
-    client.write_anzahl.assert_called_once_with("root", 0)
+    client.write_auftragssteuerung.assert_called_once_with("root", 0, "Kopf", "Auftragssteuerung_MES")
+    client.clear_product_queue.assert_called_once_with("root", "Inhalt", "Produktqueue[{index}]")
+    client.write_anzahl.assert_called_once_with("root", 0, "Inhalt")
     assert client.read_status_mes.call_count == 3
 
 
@@ -70,13 +70,13 @@ def test_recovered_completion_is_logged_before_queue_cleanup(caplog):
     client.read_auftragssteuerung.side_effect = [1, 0]
     client.read_anzahl.return_value = 0
 
-    def cleanup(root):
+    def cleanup(root, inhalt_node=None, produktqueue_pattern=None):
         assert "StatusMES=5; phase=ready/recovery" in caplog.text
 
     client.clear_product_queue.side_effect = cleanup
     with caplog.at_level("INFO", logger=plc_handshake.__name__):
         asyncio.run(plc_handshake.wait_for_plc_ready(client, "test-root"))
-    client.clear_product_queue.assert_called_once_with("test-root")
+    client.clear_product_queue.assert_called_once_with("test-root", "Inhalt", "Produktqueue[{index}]")
 
 
 def test_done_does_not_treat_initial_idle_feedback_as_completion():
@@ -84,7 +84,7 @@ def test_done_does_not_treat_initial_idle_feedback_as_completion():
     events = []
     statuses = iter([0, 1, 5, 5, 0])
 
-    def read_status(root):
+    def read_status(root, feedback_node=None, status_node=None):
         status = next(statuses)
         events.append(("status", status))
         return status
@@ -92,9 +92,15 @@ def test_done_does_not_treat_initial_idle_feedback_as_completion():
     client.read_status_mes.side_effect = read_status
     client.read_auftragssteuerung.return_value = 0
     client.read_anzahl.return_value = 0
-    client.clear_product_queue.side_effect = lambda root: events.append(("queue", 0))
-    client.write_anzahl.side_effect = lambda root, value: events.append(("count", value))
-    client.write_auftragssteuerung.side_effect = lambda root, value: events.append(("command", value))
+    client.clear_product_queue.side_effect = (
+        lambda root, inhalt_node=None, produktqueue_pattern=None: events.append(("queue", 0))
+    )
+    client.write_anzahl.side_effect = (
+        lambda root, value, inhalt_node=None: events.append(("count", value))
+    )
+    client.write_auftragssteuerung.side_effect = (
+        lambda root, value, kopf_node=None, auftragssteuerung_node=None: events.append(("command", value))
+    )
 
     asyncio.run(plc_handshake.wait_for_plc_done(client, "root"))
 
@@ -125,7 +131,7 @@ def test_reset_timeout_does_not_report_success():
     with pytest.raises(TimeoutError, match="PLC reset timeout.*status=5"):
         asyncio.run(plc_handshake.wait_for_plc_done(client, "root", reset_timeout_s=0))
 
-    client.write_auftragssteuerung.assert_called_once_with("root", 0)
+    client.write_auftragssteuerung.assert_called_once_with("root", 0, "Kopf", "Auftragssteuerung_MES")
 
 
 def test_failed_queue_cleanup_keeps_count_and_command_latched():
@@ -171,24 +177,24 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
         async def disconnect(self):
             pass
 
-        def read_auftragssteuerung(self, root):
+        def read_auftragssteuerung(self, root, kopf_node=None, auftragssteuerung_node=None):
             return self.command
 
-        def read_anzahl(self, root):
+        def read_anzahl(self, root, inhalt_node=None):
             return self.count
 
-        def clear_product_queue(self, root):
+        def clear_product_queue(self, root, inhalt_node=None, produktqueue_pattern=None):
             assert self.status == 5
             self.queue_ids = [0] * len(self.queue_ids)
             self.events.append("clear_queue")
 
-        def write_anzahl(self, root, value):
+        def write_anzahl(self, root, value, inhalt_node=None):
             assert self.status == 5 and value == 0
             assert not any(self.queue_ids)
             self.count = value
             self.events.append("clear_count")
 
-        def read_status_mes(self, root):
+        def read_status_mes(self, root, feedback_node=None, status_node=None):
             if self.command == 1:
                 self.status = 1 if self.status == 0 else 5
             elif self.reset_pending:
@@ -198,7 +204,8 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
                 self.events.append("idle")
             return self.status
 
-        def write_order(self, root, order, kind):
+        def write_order(self, root, order, kind, kopf_node=None, inhalt_node=None,
+                         auftragssteuerung_node=None, produktqueue_pattern=None):
             assert kind == auftragsart
             assert self.command == 0 and self.status == 0
             if self.dispatched_sizes:
@@ -211,7 +218,7 @@ def test_workers_complete_reset_and_confirm_idle_before_next_order(
             self.count = len(order.inhalt.Produktqueue)
             self.events.append(f"start:{order.kopf.Auftragsnummer}")
 
-        def write_auftragssteuerung(self, root, value):
+        def write_auftragssteuerung(self, root, value, kopf_node=None, auftragssteuerung_node=None):
             assert self.status == 5 and value == 0 and self.count == 0
             self.command = 0
             self.reset_pending = True
