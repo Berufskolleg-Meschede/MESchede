@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import math
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Protocol
@@ -10,6 +11,7 @@ from app.clients.opc_ua_client import OpcUaClient
 from app.domain.order_run import OrderType
 from app.domain.plc_snapshot import PlcSnapshot, ProductObservation
 from app.models.mes_auftrag import MESAuftrag
+from app.models.order_input import CatalogProduct, OrderCatalog, CATALOG_BYTE_FIELDS, CATALOG_REAL_FIELDS
 
 
 logger = logging.getLogger(__name__)
@@ -20,6 +22,10 @@ class PlcGateway(Protocol):
 
     async def read(self, kind: OrderType) -> PlcSnapshot:
         """Liest einen zugeordneten Auftragsslot."""
+        ...
+
+    async def read_input_catalog(self, kind: OrderType) -> OrderCatalog:
+        """Liest Produktspezifikationen und vorhandene Queue-Slots ohne Steuerungsaktion."""
         ...
 
     async def write(self, kind: OrderType, payload: MESAuftrag) -> None:
@@ -51,6 +57,7 @@ class PlcOrderGateway:
         self.connected = False
         self.roots: dict[OrderType, object] = {}
         self.root_names: tuple[str, str, str] | None = None
+        self.database = None
 
     async def _invoke(self, operation):
         """Lässt eine begonnene I/O-Operation auch bei Taskcancel geordnet auslaufen."""
@@ -87,6 +94,7 @@ class PlcOrderGateway:
                     OrderType.PRODUCTION: self.client._get_child(database, root_names[0]),
                     OrderType.DELIVERY: self.client._get_child(database, root_names[1]),
                 }
+                self.database = database
                 self.root_names = root_names
             except Exception:
                 try:
@@ -138,6 +146,52 @@ class PlcOrderGateway:
         """Liest den Slot ohne Schreibzugriff auf MES-, HMI- oder Feedbackwerte."""
         return await self._invoke(lambda: self._read_sync(kind))
 
+    def _read_input_catalog_sync(self, kind: OrderType) -> OrderCatalog:
+        """Verlangt tatsächliche ID-/Textfelder und lückenlose Queue-Slots ab null."""
+        root = self._root(kind)
+        catalog = self.client._get_child(self.database, "Produktspezifikation")
+        products = []
+        for node in catalog.get_children():
+            name = node.get_browse_name().Name
+            index = name.rsplit("[", 1)[-1].rstrip("]")
+            if not index.isdecimal() or int(index) == 0:
+                continue
+            fields = {field.get_browse_name().Name: field for field in node.get_children()}
+            product_id = fields["ProduktID"].get_value()
+            text = fields["Produkttext"].get_value()
+            if product_id == 0 and text == "":
+                continue
+            specification = {}
+            for field in CATALOG_BYTE_FIELDS:
+                value = fields[field].get_value()
+                if type(value) is not int or not 0 <= value <= 255:
+                    raise ValueError(f"Das SPS-Bauplanfeld {field} ist kein gültiger USInt-Wert.")
+                specification[field] = value
+            for field in CATALOG_REAL_FIELDS:
+                value = fields[field].get_value()
+                if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                    raise ValueError(f"Das SPS-Bauplanfeld {field} ist kein endlicher Zahlenwert.")
+                specification[field] = value
+            products.append(CatalogProduct(product_id=product_id, product_text=text,
+                                           source_index=int(index), specification=specification))
+        if len({item.product_id for item in products}) != len(products):
+            raise ValueError("Die Produktspezifikationen enthalten doppelte Produkt-IDs.")
+        configured = self.settings_provider()
+        content = self.client._get_child(root, configured.opcua_node_inhalt)
+        pattern = configured.opcua_node_produktqueue_pattern
+        container_name = pattern.split("[", 1)[0]
+        children = content.get_children()
+        container = next((node for node in children if node.get_browse_name().Name == container_name), None)
+        names = {node.get_browse_name().Name for node in (container.get_children() if container else children)}
+        capacity = 0
+        while capacity < 255 and (str(capacity) in names or pattern.format(index=capacity) in names):
+            capacity += 1
+        return OrderCatalog(products=products, capacity=capacity, observed_at=datetime.now(timezone.utc))
+
+    async def read_input_catalog(self, kind: OrderType) -> OrderCatalog:
+        """Serialisiert die reine Katalog-/Kapazitätsabfrage mit dem vorhandenen PLC-I/O."""
+        return await self._invoke(lambda: self._read_input_catalog_sync(kind))
+
     async def write(self, kind: OrderType, payload: MESAuftrag) -> None:
         """Nutzt den vorhandenen validierten Writer mit Start als letzter Operation."""
         def operation():
@@ -176,6 +230,7 @@ class PlcOrderGateway:
         self.connected = False
         self.roots = {}
         self.root_names = None
+        self.database = None
         if client is not None:
             client.client.disconnect()
 

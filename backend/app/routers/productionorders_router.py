@@ -1,11 +1,10 @@
 """Dauerhafte Produktionsannahme und typspezifische Leseansichten."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 
 from app.domain.order_run import OrderType
-from app.models.order_dto import OrderPageView, OrderPayload, OrderView
-from app.routers.order_dependencies import execute_order_operation, get_order_worker
-from app.services.order_admission_service import OrderAdmissionService
+from app.models.order_dto import OrderDetailView, OrderPageView, OrderPayload
+from app.routers.order_dependencies import admit_order, execute_order_operation, get_order_worker
 from app.services.order_query_service import OrderQueryService
 from app.workers.order_worker_host import OrderWorkerHost
 
@@ -31,7 +30,7 @@ async def get_production_queue_status(worker: OrderWorkerHost = Depends(get_orde
     return await execute_order_operation(lambda: worker.diagnostics(OrderType.PRODUCTION))
 
 
-@router.get("/{order_id:path}", response_model=OrderView)
+@router.get("/{order_id:path}", response_model=OrderDetailView)
 async def get_productionorder(order_id: str, worker: OrderWorkerHost = Depends(get_order_worker)):
     """Löst eine fachliche ID innerhalb des Produktionsbereichs auf."""
     query = OrderQueryService(worker.repository, worker.settings)
@@ -41,7 +40,4 @@ async def get_productionorder(order_id: str, worker: OrderWorkerHost = Depends(g
 @router.post("/", status_code=status.HTTP_202_ACCEPTED)
 async def post_productionorder(payload: OrderPayload, worker: OrderWorkerHost = Depends(get_order_worker)):
     """Bestätigt nach Speicherung die Annahme, nicht den PLC-Start."""
-    if not worker.running:
-        raise HTTPException(503, "Der Auftragsworker ist nicht gestartet. Bitte den Backendstatus prüfen.")
-    admission = OrderAdmissionService(worker.repository)
-    return await execute_order_operation(lambda: admission.accept(OrderType.PRODUCTION, payload))
+    return await admit_order(worker, OrderType.PRODUCTION, payload)

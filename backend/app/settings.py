@@ -4,6 +4,7 @@ import json
 import math
 import os
 from dataclasses import dataclass, field
+from pytz import timezone as plant_timezone
 
 
 @dataclass(frozen=True)
@@ -19,9 +20,16 @@ class OrderSettings:
     rest_buffer_s: float = 3.0
     contract_verified: bool = False
     product_results: dict[int, str] = field(default_factory=dict)
+    plant_timezone: str = "Europe/Berlin"
+    catalog_refresh_interval_s: float = 30.0
+    catalog_stale_after_s: float = 300.0
 
     def __post_init__(self) -> None:
         """Verhindert unbrauchbare Intervalle und unbelegte Ergebniscodes."""
+        plant_timezone(self.plant_timezone)
+        if (not math.isfinite(self.catalog_refresh_interval_s) or not math.isfinite(self.catalog_stale_after_s)
+                or self.catalog_refresh_interval_s <= 0 or self.catalog_stale_after_s <= self.catalog_refresh_interval_s):
+            raise ValueError("Das Katalogintervall muss positiv und kleiner als die Katalog-Veraltungsgrenze sein.")
         intervals = (
             self.poll_interval_s, self.refresh_interval_s,
             self.start_timeout_s, self.completion_timeout_s, self.reset_timeout_s,
@@ -49,4 +57,7 @@ class OrderSettings:
             rest_buffer_s=float(os.getenv("ORDER_REST_BUFFER_S", "3")),
             contract_verified=os.getenv("OPC_UA_CONTRACT_VERIFIED", "false").lower() == "true",
             product_results={int(key): value for key, value in results.items()},
+            plant_timezone=os.getenv("ORDER_PLANT_TIMEZONE", "Europe/Berlin"),
+            catalog_refresh_interval_s=float(os.getenv("PRODUCT_CATALOG_REFRESH_INTERVAL_S", "30")),
+            catalog_stale_after_s=float(os.getenv("PRODUCT_CATALOG_STALE_AFTER_S", "300")),
         )

@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 
 from app.domain.order_run import OrderType
 from app.domain.plc_snapshot import PlcSnapshot, ProductObservation
+from app.models.order_input import CatalogProduct, OrderCatalog
 
 
 class FakeLeadership:
@@ -40,6 +41,9 @@ class SimulatedGateway:
         self.closed = False
         self.reads = 0
         self.active_reads = 0
+        self.catalog_reads = 0
+        self.catalog_error = None
+        self.catalog_capacity = 33
         self.snapshots = {kind: PlcSnapshot(kind, 0, 0, 0, datetime.now(timezone.utc)) for kind in OrderType}
 
     async def read(self, kind):
@@ -52,6 +56,16 @@ class SimulatedGateway:
                 snapshot = replace(snapshot, status=5)
                 self.snapshots[kind] = snapshot
         return replace(snapshot, observed_at=datetime.now(timezone.utc))
+
+    async def read_input_catalog(self, kind):
+        """Liefert ausdrücklich synthetische Katalogdaten für isolierte Annahmetests."""
+        self.catalog_reads += 1
+        if self.catalog_error:
+            raise self.catalog_error
+        return OrderCatalog(
+            products=[CatalogProduct(product_id=1, product_text="Testprodukt")],
+            capacity=self.catalog_capacity, observed_at=datetime.now(timezone.utc),
+        )
 
     async def write(self, kind, payload):
         """Prüft gemeinsamen Idle vor dem Start und behält Eingabeeinheiten bei."""
