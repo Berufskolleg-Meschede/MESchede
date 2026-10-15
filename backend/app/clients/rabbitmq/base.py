@@ -28,19 +28,27 @@ class RabbitMQClient:
         if self._channel is None or self._channel.is_closed:
             self._channel = self._connection.channel()
             self._channel.queue_declare(queue=self.queue_name, durable=True)
+            self._channel.confirm_delivery()
 
-    def publish_storage_message(self, product_id: int, quantity_delta: int) -> None:
+    def publish_storage_message(
+        self,
+        product_id: int,
+        quantity_delta: int,
+        message_id: str | None = None,
+    ) -> None:
         payload = {
             "product_id": product_id,
             "quantity_delta": quantity_delta,
         }
         self._connect()
-        self._channel.basic_publish(
+        confirmed = self._channel.basic_publish(
             exchange="",
             routing_key=self.queue_name,
             body=json.dumps(payload),
-            properties=pika.BasicProperties(delivery_mode=2),
+            properties=pika.BasicProperties(delivery_mode=2, message_id=message_id),
         )
+        if not confirmed:
+            raise RuntimeError("RabbitMQ hat die Lagermengenänderung nicht bestätigt.")
 
     def close(self) -> None:
         """Close the connection explicitly."""
@@ -57,11 +65,16 @@ class RabbitMQClient:
         self.close()
 
 
-def send_storage_message(product_id: int, quantity_delta: int) -> None:
+def send_storage_message(
+    product_id: int,
+    quantity_delta: int,
+    message_id: str | None = None,
+) -> None:
     """
     Send a storage change event to RabbitMQ.
 
     :param product_id: The article ID
     :param quantity_delta: The quantity change (positive for adding, negative for removing)
     """
-    RabbitMQClient().publish_storage_message(product_id, quantity_delta)
+    with RabbitMQClient() as client:
+        client.publish_storage_message(product_id, quantity_delta, message_id)
