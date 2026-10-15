@@ -9,7 +9,7 @@ click==8.3.0
 dnspython==2.8.0
 dotenv==0.9.9
 email-validator==2.3.0
-fastapi==0.124.2
+fastapi==0.143.1
 fastapi-cli==0.0.16
 fastapi-cloud-cli==0.6.0
 fastar==0.8.0
