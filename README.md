@@ -247,6 +247,25 @@ npm install
 npm run dev
 ```
 
+### Deploying a release on the NAS
+
+Pushing a Git tag or publishing a GitHub Release builds and pushes separate backend and frontend images to GHCR. Both images receive the release tag, the short commit SHA tag, and `latest`.
+
+Set the desired release tag in the `.env` file beside `docker-compose.prod.yml` on the NAS:
+
+```env
+MES_IMAGE_TAG=v0.2.0
+```
+
+Then pull and start that exact version:
+
+```bash
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+```
+
+The existing release can be built from GitHub Actions by manually running **Build and Push Docker Images to GHCR** with its tag selected as the workflow ref. Creating the tag or publishing a release after this workflow is deployed also starts the build automatically.
+
 ---
 
 ## RabbitMQ Integration

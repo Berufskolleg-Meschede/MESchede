@@ -3,8 +3,11 @@ name: Build and Push Docker Images to GHCR
 on:
   push:
     branches: ["main"]
+    tags: ["v*"]
   pull_request:
     branches: ["main"]
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -12,9 +15,12 @@ permissions:
 
 jobs:
   build-backend:
-    # Publishing is only permitted from the protected main branch. PRs and
-    # manual runs on other refs must never receive package write permission.
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    # Publish main builds and version tags only. PRs and other refs must not
+    # receive package write permission.
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      (github.event_name == 'release' && github.event.action == 'published' && startsWith(github.event.release.tag_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,8 +45,16 @@ jobs:
         run: |
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           image="ghcr.io/${owner}/meschede-backend"
-          echo "latest=${image}:latest" >> $GITHUB_OUTPUT
-          echo "sha=${image}:sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          tags="${image}:latest
+          ${image}:sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tags+=$'\n'"${image}:${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push backend image
         uses: docker/build-push-action@v6
@@ -48,12 +62,13 @@ jobs:
           context: ./backend
           file: ./backend/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ steps.vars.outputs.latest }}
-            ${{ steps.vars.outputs.sha }}
+          tags: ${{ steps.vars.outputs.tags }}
 
   build-frontend:
-    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    if: >-
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))) ||
+      (github.event_name == 'release' && github.event.action == 'published' && startsWith(github.event.release.tag_name, 'v')) ||
+      (github.event_name == 'workflow_dispatch' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -78,8 +93,16 @@ jobs:
         run: |
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           image="ghcr.io/${owner}/meschede-frontend"
-          echo "latest=${image}:latest" >> $GITHUB_OUTPUT
-          echo "sha=${image}:sha-${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          tags="${image}:latest
+          ${image}:sha-${GITHUB_SHA::7}"
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tags+=$'\n'"${image}:${GITHUB_REF_NAME}"
+          fi
+          {
+            echo "tags<<EOF"
+            printf '%s\n' "$tags"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v6
@@ -87,6 +110,4 @@ jobs:
           context: ./frontend
           file: ./frontend/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ steps.vars.outputs.latest }}
-            ${{ steps.vars.outputs.sha }}
+          tags: ${{ steps.vars.outputs.tags }}
