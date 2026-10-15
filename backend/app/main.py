@@ -7,6 +7,9 @@ import os
 from dataclasses import replace
 
 from fastapi import FastAPI
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from app.clients.plc_order_gateway import PlcOrderGateway
 from app.clients.plc_storage_gateway import PlcStorageGateway
@@ -70,7 +73,19 @@ def create_app(worker: OrderWorkerHost | None = None, storage_gateway: PlcStorag
             await gateway.close()
             stop_storage_consumer()
 
-    application = FastAPI(lifespan=lifespan)
+    application = FastAPI(lifespan=lifespan, docs_url=None)
+    swagger_ui_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "swagger-ui")
+    application.mount("/docs/assets", StaticFiles(directory=swagger_ui_dir), name="swagger-ui-assets")
+
+    @application.get("/docs", include_in_schema=False)
+    async def swagger_ui() -> HTMLResponse:
+        return get_swagger_ui_html(
+            openapi_url=application.openapi_url,
+            title=f"{application.title} - Swagger UI",
+            swagger_js_url="/docs/assets/swagger-ui-bundle.js",
+            swagger_css_url="/docs/assets/swagger-ui.css",
+        )
+
     for router in (
         storage_router.router, productionorders_router.router,
         deliveryorders_router.router, orders_router.router, settings_router.router,
