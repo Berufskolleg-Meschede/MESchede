@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 class OpcUaClient(ProductionClient):
     _FIELD_NAME_MAP = {"Prioritaet": "Priorität"}
     _CHILD_NAME_ALIASES = {
+        "Produktspezifikation": ("Produktspezifikationen",),
         # Prefer the correctly spelled commissioning node; accept the former PLC spelling for compatibility.
         "MESAuftragKommissionieren": ("MESAuftragKommisionieren",),
         # Some PLC exports spell the feedback status field with an underscore.

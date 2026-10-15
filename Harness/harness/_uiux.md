@@ -290,6 +290,24 @@ The following is agreed target behavior for issue #29; it does not change the cu
 - Display one shared dispatch order across production and delivery, oldest accepted first. The MES allows only one active dispatch across both types.
 - Manual order creation/start belongs to the separate issue #30. This overview work does not turn the demo status selector into an authoritative live-run control.
 
+## Issue 30: agreed manual order entry
+
+The following is agreed target behavior, not an implementation claim. The contract and acceptance criteria are in `../../docs/specs/issue-30-manual-order-start.md`.
+
+- Add **Neuer Auftrag** to both order pages and use one shared entry/review flow. Keep the dashboard read-only.
+- Show business order ID and PLC order number as separate editable fields, each with an automatically suggested unused value. Suggestions do not reserve identifiers; conflicts remain visible and require renewed confirmation after changes.
+- Support multiple product rows with a quantity per row. Preserve visible row order when creating units; show total quantity and the confirmed capacity limit.
+- Select products from the authoritative PLC specifications catalog. Do not default silently to a product or substitute mock articles after a catalog failure.
+- Read product choices from the persistent catalog mirror. **Produktdaten abgleichen** explicitly requests a PLC read and database synchronization, without submitting an order. Keep existing input after synchronization; validate changed ID/text pairs again before admission. Failed or stale catalog data block new orders while retaining the last known products.
+- Offer an editable serial start number; serials increase across all product rows within that order. Show the resulting range and reject overflow.
+- Prefill editable date and time from local plant time. Send date/time without a timezone offset and keep planned values separate from observed run timestamps.
+- Customer number is optional. Priority and parameters are editable under **Weitere Angaben**, using model defaults; priority does not reorder MES FIFO.
+- Show all effective values in **Auftrag prüfen** before **Auftrag annehmen**. Entry-step submission only opens the summary.
+- Lock editing, repeat confirmation, and dialog dismissal during submission. Preserve values after a confirmed rejection.
+- Treat accepted, waiting for start confirmation, confirmed running, and failure/review as distinct states. `202` alone cannot confirm PLC start.
+- After an uncertain response or reload, check stored admission before retry. Keep the attempted identifiers and full payload unchanged; when checking fails, offer another check and block retries of that attempt.
+- After acceptance, refresh the list and keep the accepted order's detail reachable and updated independently of filters and pagination. A refresh failure does not erase confirmed acceptance.
+
 ## Completion checklist for UI changes
 
 Issue #29 completion displays mapped successful and failed unit results. A

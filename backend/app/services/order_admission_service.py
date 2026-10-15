@@ -12,9 +12,9 @@ class OrderAdmissionService:
         """Übernimmt die transaktionale Persistenz als Abhängigkeit."""
         self.repository = repository
 
-    def accept(self, kind: OrderType, payload: OrderPayload) -> dict:
+    def accept(self, kind: OrderType, payload: OrderPayload, validate=None) -> dict:
         """Liefert nach Commit eine Referenz, ohne einen PLC-Start zu behaupten."""
-        stored = self.repository.admit(kind, payload)
+        stored = self.repository.admit(kind, payload, validate)
         queued = self.repository.queue_size(kind)
         return {
             "queued": stored.run.phase == "queued",

@@ -12,6 +12,7 @@ from app.repositories.order_repository import OrderRepository
 from app.repositories.worker_leadership import WorkerLeadership
 from app.services.order_dispatch_service import OrderDispatchService
 from app.services.order_recovery_service import OrderRecoveryService
+from app.services.order_input_service import OrderInputService
 from app.settings import OrderSettings
 
 
@@ -21,7 +22,8 @@ logger = logging.getLogger(__name__)
 class OrderWorkerHost:
     """Besitzt Hintergrundtask, Verbindungen und Diagnose; Fachregeln bleiben in Services."""
 
-    def __init__(self, repository: OrderRepository, gateway: PlcGateway, settings: OrderSettings, leadership=None) -> None:
+    def __init__(self, repository: OrderRepository, gateway: PlcGateway, settings: OrderSettings,
+                 leadership=None, catalog_gateway: PlcGateway | None = None) -> None:
         """Setzt austauschbare Services zusammen, ohne beim Konstruktorstart die PLC zu kontaktieren."""
         self.repository = repository
         self.gateway = gateway
@@ -29,6 +31,9 @@ class OrderWorkerHost:
         self.leadership = leadership or WorkerLeadership(repository.engine)
         self.dispatch = OrderDispatchService(repository, gateway, settings, self.leadership)
         self.recovery = OrderRecoveryService(repository)
+        self.catalog_gateway = catalog_gateway or gateway
+        self.input_service = OrderInputService(repository, self.catalog_gateway, settings)
+        self.catalog_task: asyncio.Task | None = None
         self.task: asyncio.Task | None = None
         self.phase = "stopped"
         self.last_error: str | None = None
@@ -47,6 +52,21 @@ class OrderWorkerHost:
         self.phase = "starting"
         self.task = asyncio.create_task(self._run(), name="mes-order-worker")
         self.task.add_done_callback(self._finished)
+        self.catalog_task = asyncio.create_task(self._synchronize_catalog(), name="mes-product-catalog")
+
+    async def _synchronize_catalog(self) -> None:
+        """Aktualisiert den DB-Katalog unabhängig von der Startvergabe und erhält Fehlerstände."""
+        try:
+            while True:
+                for kind in OrderType:
+                    try:
+                        await self.input_service.synchronize(kind)
+                    except (OSError, TimeoutError, KeyError, ValueError, ua.UaError, SQLAlchemyError) as error:
+                        logger.warning("Produktkatalog-Abgleich fehlgeschlagen: %s", error)
+                await asyncio.sleep(self.settings.catalog_refresh_interval_s)
+        finally:
+            if self.catalog_gateway is not self.gateway:
+                await self.catalog_gateway.close()
 
     def _finished(self, task: asyncio.Task) -> None:
         """Macht einen unbehandelten Taskausstieg sofort sichtbar."""
@@ -67,6 +87,7 @@ class OrderWorkerHost:
             stale_after_s=max(self.settings.stale_after_s, interval_s * 2),
         )
         self.dispatch.settings = self.settings
+        self.input_service.settings = self.settings
 
     async def _run(self) -> None:
         """Beobachtet beide Slots, bevor der gemeinsame Dispatch weitergeführt wird."""
@@ -139,15 +160,15 @@ class OrderWorkerHost:
 
     async def stop(self) -> None:
         """Stoppt die Auswahl; ein laufender I/O-Aufruf wird vom Gateway vor Lockfreigabe beendet."""
-        if self.task is None or self.task.done():
-            return
-        self.task.cancel()
-        try:
-            await self.task
-        except asyncio.CancelledError:
-            pass
-        finally:
-            self.phase = "stopped"
+        tasks = [task for task in (self.task, self.catalog_task) if task is not None]
+        for task in tasks:
+            task.cancel()
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException) and not isinstance(result, asyncio.CancelledError):
+                logger.error("Hintergrundtask beim Beenden fehlgeschlagen.",
+                             exc_info=(type(result), result, result.__traceback__))
+        self.phase = "stopped"
 
     def diagnostics(self, kind: OrderType) -> dict:
         """Liefert Workerinformationen ohne Verbindung oder Schreiben zur PLC."""

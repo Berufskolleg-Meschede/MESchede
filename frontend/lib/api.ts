@@ -13,11 +13,11 @@ import {
   type AnalyticsRun,
   type OrderOverview,
   type OrderPageData,
-  type OrderRunView,
   type OrderType as RunOrderType,
   type OrderStatus as RunOrderStatus,
   type RunReview,
   type ReviewResult,
+  type OrderPayload,
 } from './types'
 import { OrderApiClient, OrderApiError } from './order-api'
 
@@ -102,7 +102,10 @@ export const api = {
   list: (type: RunOrderType, options?: { offset?: number; search?: string; status?: RunOrderStatus | 'all' }, signal?: AbortSignal): Promise<OrderPageData> =>
     orderApi.list(type, options, signal),
   overview: (signal?: AbortSignal): Promise<OrderOverview> => orderApi.overview(signal),
-  detail: (type: RunOrderType, orderId: string): Promise<OrderRunView> => orderApi.detail(type, orderId),
+  detail: (type: RunOrderType, orderId: string, signal?: AbortSignal) => orderApi.detail(type, orderId, signal),
+  inputContext: (type: RunOrderType, signal?: AbortSignal) => orderApi.inputContext(type, signal),
+  synchronizeCatalog: (type: RunOrderType) => orderApi.synchronizeCatalog(type),
+  createOrder: (type: RunOrderType, data: OrderPayload) => orderApi.create(type, data),
   review: (runId: string, data: RunReview): Promise<ReviewResult> => orderApi.review(runId, data),
 
   analytics: {

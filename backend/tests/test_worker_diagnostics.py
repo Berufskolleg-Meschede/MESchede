@@ -13,6 +13,7 @@ from app.routers import productionorders_router, deliveryorders_router
 from app.settings import OrderSettings
 from app.workers.order_worker_host import OrderWorkerHost
 from tests.order_fakes import FakeLeadership, SimulatedGateway
+from tests.test_orders_api import seed_catalog
 
 
 @pytest.mark.parametrize("kind,router,prefix", [
@@ -84,6 +85,7 @@ def test_started_and_stopped_worker_liveness_is_reported(order_repository):
 ])
 def test_http_acceptance_and_status_use_the_same_queue(order_repository, order_payload, kind, router, prefix):
     """HTTP-Annahme, Bereichsliste und Diagnose haben dieselbe dauerhafte Quelle."""
+    seed_catalog(order_repository)
     host = OrderWorkerHost(order_repository, SimulatedGateway(), OrderSettings(), FakeLeadership())
     host.task = MagicMock()
     host.task.done.return_value = False

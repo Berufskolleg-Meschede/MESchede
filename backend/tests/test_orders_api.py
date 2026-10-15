@@ -12,6 +12,9 @@ from app.main import create_app
 from app.routers import productionorders_router,deliveryorders_router,orders_router
 from app.settings import OrderSettings
 from app.workers.order_worker_host import OrderWorkerHost
+from app.repositories.product_catalog_repository import ProductCatalogRepository
+from app.models.order_input import CatalogProduct, OrderCatalog
+from datetime import datetime, timezone
 from tests.order_fakes import FakeLeadership,SimulatedGateway
 from tests.test_order_services import running_order
 
@@ -19,6 +22,7 @@ from tests.test_order_services import running_order
 def client_for(repository):
     """Injiziert den echten Repository; GET und Reviews verbinden niemals zur PLC."""
     gateway = SimulatedGateway()
+    seed_catalog(repository)
     host = OrderWorkerHost(repository,gateway,OrderSettings(),FakeLeadership())
     host.task = MagicMock()
     host.task.done.return_value = False
@@ -27,6 +31,15 @@ def client_for(repository):
     for router in (productionorders_router.router,deliveryorders_router.router,orders_router.router):
         application.include_router(router)
     return TestClient(application),gateway
+
+
+def seed_catalog(repository):
+    """Speichert ausdrücklich synthetische Produktdaten als Voraussetzung der Annahme."""
+    for kind in OrderType:
+        ProductCatalogRepository(repository.engine).save(kind, OrderCatalog(
+            products=[CatalogProduct(product_id=1, product_text="Testprodukt")],
+            capacity=33, observed_at=datetime.now(timezone.utc),
+        ))
 
 
 def test_pages_filter_before_pagination_and_share_global_review(order_repository,order_payload):
@@ -80,6 +93,7 @@ def test_http_review_without_note_is_idempotent_and_keeps_reservation(order_repo
 
 
 def test_injected_app_lifespan_works_without_live_plc(order_repository,order_payload):
+    seed_catalog(order_repository)
     gateway = SimulatedGateway()
     host = OrderWorkerHost(order_repository,gateway,OrderSettings(),FakeLeadership())
     with TestClient(create_app(host)) as client:

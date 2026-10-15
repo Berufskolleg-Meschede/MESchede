@@ -23,7 +23,10 @@ class OrderPayload(BaseModel):
     @classmethod
     def normalize_order_id(cls, value: str) -> str:
         """Verwendet für Idempotenz und PLC-Zuordnung eine kanonische Auftrags-ID."""
-        return value.strip()
+        normalized = value.strip()
+        if normalized in {".", "..", "queue-status"}:
+            raise ValueError("Diese Auftrag-ID ist für die Auftragsabfrage reserviert. Bitte eine andere ID wählen.")
+        return normalized
 
 
 class SourceStatus(BaseModel):
@@ -75,6 +78,14 @@ class OrderView(BaseModel):
     ended_at: datetime | None
     source: SourceStatus
     units: list[ProductUnitView]
+
+
+class OrderDetailView(OrderView):
+    """Ergänzt nur das Detail um den unveränderlichen Eingabeinhalt für Retry-Abgleiche."""
+
+    mes_auftrag: MESAuftrag
+    refresh_interval_s: float
+    stale_after_s: float
 
 
 class ReviewRequest(BaseModel):

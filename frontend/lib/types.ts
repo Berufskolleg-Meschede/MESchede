@@ -127,6 +127,32 @@ export class ApiValidationError extends Error {
 }
 
 export type OrderType = 'production' | 'delivery'
+
+export interface MesOrderInput {
+  kopf: {
+    Auftragsnummer: number; Kundennummer: number; Startdatum: string; Startzeit: string
+    Prioritaet: number; Parameter0: number; Parameter1: number
+  }
+  inhalt: {
+    SeriennummerStart: number
+    Produktqueue: { ProduktID: number; Produkttext: string; Seriennummer: number; Sequenznummer: number; Takt: number }[]
+  }
+}
+
+export interface OrderPayload { order_id: string; mes_auftrag: MesOrderInput }
+export interface CatalogProduct { product_id: number; product_text: string }
+export interface OrderInputContext {
+  available: boolean; suggested_order_id: string | null; suggested_plc_order_number: number | null
+  start_date: string; start_time: string; plant_timezone: string
+  products: CatalogProduct[]; capacity: number | null; observed_at: string | null; error: string | null
+  refresh_interval_s: number; stale_after_s: number
+}
+export interface OrderAdmission {
+  queued: boolean; order_id: string; order_ref: string; run_id: string; accepted_sequence: number; queue_size: number
+}
+export interface OrderDetailView extends OrderRunView {
+  mes_auftrag: MesOrderInput; refresh_interval_s: number; stale_after_s: number
+}
 export type RunPhase = 'queued' | 'preparing' | 'start_pending' | 'running' | 'completion_observed' |
   'awaiting_reset' | 'completed' | 'interrupted' | 'review_required'
 

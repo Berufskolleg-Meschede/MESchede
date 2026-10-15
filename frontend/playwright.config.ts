@@ -13,7 +13,7 @@ export default defineConfig({
   ],
   webServer: [
     { command: 'node tests/support/backend-server.mjs', url: 'http://127.0.0.1:18029/health', reuseExistingServer: false },
-    { command: 'npm run dev -- --hostname 127.0.0.1 --port 3029', url: 'http://127.0.0.1:3029', reuseExistingServer: false,
-      env: { MES_BACKEND_URL: 'http://127.0.0.1:18029' }, timeout: 60000 },
+    { command: 'node tests/support/frontend-server.mjs', url: 'http://127.0.0.1:3029', reuseExistingServer: false,
+      env: { MES_BACKEND_URL: 'http://127.0.0.1:18029', MES_NEXT_DIST_DIR: '.next/issue30-tests' }, timeout: 120000 },
   ],
 })
