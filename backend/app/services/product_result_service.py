@@ -29,7 +29,7 @@ class ProductResultService:
             self._observe_phase(run, snapshot)
             if snapshot.status == 5:
                 manual_conflict = self._observe_results(
-                    run, state, self.repository.load_units(session, run_id), snapshot, order.order_type
+                    session, run, state, self.repository.load_units(session, run_id), snapshot, order.order_type
                 )
                 if run.review_required and not manual_conflict:
                     run.review_required = False
@@ -66,7 +66,7 @@ class ProductResultService:
         if snapshot.status == 5 and run.phase in {RunPhase.START_PENDING.value, RunPhase.RUNNING.value}:
             self.repository.change_phase(run, RunPhase.COMPLETION_OBSERVED)
 
-    def _observe_results(self, run, state, units: list, snapshot: PlcSnapshot, order_type: str) -> bool:
+    def _observe_results(self, session, run, state, units: list, snapshot: PlcSnapshot, order_type: str) -> bool:
         """Übernimmt Endresultate; bestätigter Abschluss setzt unbekannte Einheiten auf erfolgreich."""
         observations = {}
         ambiguous_indices = set()
