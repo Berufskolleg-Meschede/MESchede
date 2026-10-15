@@ -50,7 +50,7 @@ starlette==0.50.0
 typer==0.20.0
 typing-inspection==0.4.2
 typing_extensions==4.15.0
-urllib3==2.6.1
+urllib3==2.8.0
 uv==0.9.5
 uvicorn==0.38.0
 uvloop==0.22.1
