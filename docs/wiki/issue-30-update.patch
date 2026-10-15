@@ -1,0 +1,152 @@
+diff --git a/Configuration-English.md b/Configuration-English.md
+index 223b7f8..2b24acb 100644
+--- a/Configuration-English.md
++++ b/Configuration-English.md
+@@ -52,3 +52,11 @@ Two separate configuration layers: **`.env` files** (connection/secret values, r
+ | `opcua_node_lager_produkte` | `LagerProdukte` | High-rack storage node (total + per product/color) |
+ 
+ Only the **browse names** are configurable, not their structural position in the tree (that is hardwired in the OPC UA client). The same applies to the four storage nodes above — their fields (e.g. `StueckzahlGesamt`, `StueckzahlRot`) are hardwired in `PlcStorageGateway`, only the browse name of each parent node is adjustable. `settings_service.apply_settings()` additionally keeps an in-memory cache up to date and mirrors `polling_interval_ms` into `plc_handshake.POLL_INTERVAL_S`. Changes via `PUT /settings/` are possible at any time — except the target node of an order type while an order of that type is active (**409**); the storage nodes are not subject to this lock.
++
++## Plant time for manual orders
++
++`ORDER_PLANT_TIMEZONE` defaults to `Europe/Berlin`. The backend supplies local date/time suggestions; `Startzeit` is sent without a timezone offset. The existing `pytz` package supplies timezone data in the Alpine image. These fields do not introduce additional scheduling.
++
++## Product catalog mirror
++
++`PRODUCT_CATALOG_REFRESH_INTERVAL_S=30` controls the background read interval; `PRODUCT_CATALOG_STALE_AFTER_S=300` controls catalog freshness independently of live order status. Values must be finite, positive and the stale limit greater than the refresh interval. A read failure blocks first admission immediately; stored data remain intact until a successful sync. Apply migration `plc_catalog_01` first. `python -m app.scripts.sync_product_catalog` imports once without starting the order worker.
+diff --git a/Data-Model-and-API-English.md b/Data-Model-and-API-English.md
+index 3efb922..044f6eb 100644
+--- a/Data-Model-and-API-English.md
++++ b/Data-Model-and-API-English.md
+@@ -94,3 +94,13 @@ A unit's result is derived from `settings.product_results[raw_status]` (configur
+ ## Areas without independent test coverage
+ 
+ `backend/tests/` covers the order pipeline, the PLC handshake, settings, and the storage consumer very broadly (see [Development and Tests](Development-and-Tests-English)). `analytics.py`/`analytics_router.py`, as well as the review path in `orders_router.py`, have **no dedicated** test file — only incidental coverage via other tests. Implemented as current behavior, but with less test coverage than the rest of the pipeline.
++
++## Entry preparation and admission reconciliation (Issue #30)
++
++`GET /orders/input-context?order_type=production` or `delivery` returns availability, independent unused ID/PLC-number suggestions, plant-local date/time, validated products, observed slot capacity, timestamps, errors and refresh intervals. Reading does not reserve identifiers.
++
++Both existing POST routes retain `OrderPayload`. First admission validates fresh product data, ID/text pairs, capacity, strict integer PLC values, offset-free time, SIMATIC DATE bounds and serial-range overflow. Existing identical orders are resolved before catalog checks; conflicting content remains `409`. Field-specific validation returns structured `422` details.
++
++Type-specific detail now returns `OrderDetailView` with the complete normalized `mes_auftrag` and refresh intervals; list DTOs stay unchanged. The immutable input supports reconciliation after a timeout or proxy-503. The catalog contract is live-verified; first admission uses the persisted mirror and rejects unavailable prerequisites.
++
++`POST /orders/catalog/sync?order_type=production|delivery` reads the PLC and updates the catalog tables only. `plc_catalog_product` stores ID/text/index/specification/availability/time; `plc_catalog_state` stores per-type capacity and success/error status. Run migration `plc_catalog_01` before using the application. Existing order and article data are unchanged.
+diff --git a/Datenmodell-und-API.md b/Datenmodell-und-API.md
+index 49f9881..937ab87 100644
+--- a/Datenmodell-und-API.md
++++ b/Datenmodell-und-API.md
+@@ -94,3 +94,15 @@ Das Ergebnis einer Einheit wird aus `settings.product_results[raw_status]` abgel
+ ## Nicht unabhängig getestete Bereiche
+ 
+ `backend/tests/` deckt die Order-Pipeline, den PLC-Handshake, die Settings und den Storage-Consumer sehr breit ab (siehe [Entwicklung und Tests](Entwicklung-und-Tests)). `analytics.py`/`analytics_router.py` sowie der Review-Pfad über `orders_router.py` haben **keine eigene** Testdatei — nur beiläufige Abdeckung über andere Tests. Als aktuelles Verhalten implementiert, aber mit geringerer Testabdeckung als der Rest der Pipeline.
++
++## Erfassungsvorbereitung und Inhaltsabgleich (Issue #30)
++
++`GET /orders/input-context?order_type=production` beziehungsweise `delivery` liefert `available`, unabhängige `suggested_order_id`/`suggested_plc_order_number`, `start_date`/`start_time`, `plant_timezone`, Katalogprodukte, Kapazität, Beobachtungszeit, Fehler und Aktualisierungsintervalle. Vorschläge reservieren keine Nummern. Unbekannte Voraussetzungen führen zu `available=false`.
++
++Die beiden bestehenden POST-Routen verwenden weiterhin `OrderPayload`. Erstmalige Annahme prüft frische Katalogdaten, gültige Produkt-ID/Text-Paare, verfügbare Queue-Kapazität, ganzzahlige PLC-Werte, offsetfreie Zeit, SIMATIC-DATE-Grenzen und Seriennummernbereich. Bereits gespeicherte gleiche Identität/Inhalt wird vor erneuter Katalogprüfung idempotent aufgelöst; abweichender Inhalt bleibt `409`. `OrderInputError` liefert strukturierte `422`-Feldpfade.
++
++Die typspezifischen Detailrouten liefern jetzt `OrderDetailView` mit vollständigem normalisiertem `mes_auftrag` und Aktualisierungsintervallen. Listen bleiben bei `OrderView`. Der vollständige Inhalt erlaubt den Abgleich nach Timeout; ein Proxy-503 beweist keine Nichtannahme.
++
++Der SPS-Katalogvertrag ist lesend an der Anlage bestätigt. Erstannahme prüft den persistenten DB-Spiegel; ohne gültige Voraussetzungen wird keine neue Annahme freigegeben.
++
++`POST /orders/catalog/sync?order_type=production|delivery` liest die SPS und aktualisiert ausschließlich die Katalogtabellen. `plc_catalog_product` speichert ID/Text/Index/Bauplan/Verfügbarkeit/Zeit; `plc_catalog_state` speichert Kapazität und Erfolgs-/Fehlerstatus je Auftragsart. Migration `plc_catalog_01` vor Anwendungsstart ausführen. Vorhandene Auftrags- und Artikeldaten bleiben erhalten.
+diff --git a/Frontend-English.md b/Frontend-English.md
+index bff4cd3..2ff8c07 100644
+--- a/Frontend-English.md
++++ b/Frontend-English.md
+@@ -27,3 +27,11 @@ Details on both variables: [Configuration](Configuration-English).
+ 
+ - **Playwright e2e** (`playwright.config.ts`): starts an echo-fixture backend (`tests/support/backend-server.mjs`) and `next dev`; checks the `/api/mes` proxy (`tests/proxy.spec.ts`) and the order UI including the review dialog and responsive layout (`tests/orders.spec.ts`).
+ - **Preview harness** (`npm run dev:preview` / `test:preview`): starts the real frontend app against an in-memory fixture store (`PreviewOrderStore`, no backend/Postgres/PLC needed) with a visible notice banner (`MES_PREVIEW_MODE=true`). `tests/preview/store.test.mjs` tests the store directly (FIFO, idempotent/conflicting reviews, validation); `tests/preview/ui.spec.ts` drives the full UI flow including review and reset.
++
++## Manual order entry (Issue #30)
++
++Both order pages offer **Neuer Auftrag** with multiple product rows, quantities, independent editable suggestions for business ID and PLC order number, and an editable serial start number. Serials increase across all rows within that order. Plant-local date/time is prefilled and sent without an offset. Customer number is optional; priority and parameters have editable defaults. All effective values are summarized before admission.
++
++`202` confirms durable admission, not PLC start. Uncertain attempts are retained in browser session storage and checked against the complete stored detail after reload. A reliable `404` permits an explicit retry of the identical request. Open details refresh independently of list filters and pagination.
++
++Preparation uses `GET /orders/input-context?order_type=production` or `delivery`. Missing/stale catalog data or unknown capacity block first admission. The catalog fields and six products were live-verified read-only on October 15, 2026. Preparation reads the persistent DB mirror; **Produktdaten abgleichen** requests an explicit PLC read and DB sync. Errors or stale snapshots block new admission. Plant acceptance of new orders remains open. Browser checks use an isolated webpack production build under `.next/issue30-tests` with the local HTTP fixture.
+diff --git a/Frontend.md b/Frontend.md
+index cfe7d45..1923fa2 100644
+--- a/Frontend.md
++++ b/Frontend.md
+@@ -27,3 +27,13 @@ Details zu beiden Variablen: [Konfiguration](Konfiguration).
+ 
+ - **Playwright e2e** (`playwright.config.ts`): startet einen Echo-Fixture-Backend (`tests/support/backend-server.mjs`) und `next dev`; prüft den `/api/mes`-Proxy (`tests/proxy.spec.ts`) und das Auftrags-UI inkl. Review-Dialog, responsives Layout (`tests/orders.spec.ts`).
+ - **Preview-Harness** (`npm run dev:preview` / `test:preview`): startet die echte Frontend-App gegen einen in-memory Fixture-Store (`PreviewOrderStore`, kein Backend/Postgres/PLC nötig) mit sichtbarem Hinweis-Banner (`MES_PREVIEW_MODE=true`). `tests/preview/store.test.mjs` testet den Store direkt (FIFO, idempotente/konfliktbehaftete Reviews, Validierung), `tests/preview/ui.spec.ts` fährt den vollen UI-Flow inkl. Review und Reset.
++
++## Manuelle Auftragserfassung (Issue #30)
++
++Beide Auftragsseiten bieten **Neuer Auftrag** mit mehreren Produktzeilen und Menge, getrennten editierbaren Vorschlägen für Auftrag-ID/PLC-Auftragsnummer und einer editierbaren Seriennummernstartnummer. Die Seriennummern laufen innerhalb dieses Auftrags über alle Zeilen fortlaufend. Datum/Uhrzeit werden in Anlagenzeit vorbelegt und ohne Offset übertragen. Kundennummer ist optional; Priorität und Parameter sind mit Standardwerten editierbar. Vor der Annahme erscheint eine vollständige Zusammenfassung.
++
++`202` bestätigt dauerhaftes Speichern und Einreihen, keinen PLC-Start. Ein unklarer Sendeversuch wird in der Browsersitzung gesichert und nach Reload zuerst anhand des vollständigen Details geprüft. Nur nach verlässlichem `404` kann derselbe unveränderte Request erneut gesendet werden. Das Detail wird unabhängig von Listenseite und Filtern aktualisiert.
++
++Die Vorbereitung verwendet `GET /orders/input-context?order_type=production` beziehungsweise `delivery`. Fehlende oder veraltete Katalogdaten und unbekannte Kapazitäten sperren die Erfassung. Die Katalogfelder und sechs Produkte wurden am 15.10.2026 lesend an der SPS bestätigt. Die Vorbereitung liest den persistenten DB-Spiegel; **Produktdaten abgleichen** fordert einen SPS-Lesezugriff mit DB-Abgleich an. Fehler oder veraltete Stände sperren neue Annahmen. Die Anlagenabnahme neuer Aufträge bleibt offen.
++
++Die Browserprüfung startet jetzt einen eigenen Produktionsbuild mit webpack unter `.next/issue30-tests` gegen die lokale HTTP-Fixture. Der laufende Entwicklungsserver bleibt erhalten.
+diff --git a/Konfiguration.md b/Konfiguration.md
+index 9f0f722..5ddd358 100644
+--- a/Konfiguration.md
++++ b/Konfiguration.md
+@@ -52,3 +52,11 @@ Zwei getrennte Konfigurationsebenen: **`.env`-Dateien** (Verbindungs-/Geheimnisw
+ | `opcua_node_lager_produkte` | `LagerProdukte` | Hochregallager-Knoten (Gesamtzahl + je Produkt/Farbe) |
+ 
+ Nur die **Browse-Namen** sind konfigurierbar, nicht ihre strukturelle Position im Baum (die ist im OPC-UA-Client fest verdrahtet). Das gilt auch für die vier Lagerknoten oben — ihre Felder (z. B. `StueckzahlGesamt`, `StueckzahlRot`) sind im `PlcStorageGateway` fest verdrahtet, nur der Browse-Name des jeweiligen Elternknotens ist einstellbar. `settings_service.apply_settings()` hält zusätzlich einen In-Memory-Cache aktuell und spiegelt `polling_interval_ms` in `plc_handshake.POLL_INTERVAL_S`. Ändern über `PUT /settings/` ist jederzeit möglich — außer die Ziel-Node eines Auftragstyps, während ein Auftrag dieses Typs aktiv läuft (**409**); die Lagerknoten unterliegen dieser Sperre nicht.
++
++## Anlagenzeit für manuelle Aufträge
++
++`ORDER_PLANT_TIMEZONE` verwendet standardmäßig `Europe/Berlin`. Die Backend-Uhr stellt lokale Datums-/Zeitvorbelegungen bereit; `Startzeit` wird ohne Zeitzonenoffset gesendet. Der vorhandene `pytz`-Datenbestand liefert die Zeitzonen auch im Alpine-Container. Die Felder führen keine zusätzliche Terminplanung ein.
++
++## Produktkatalogspiegel
++
++`PRODUCT_CATALOG_REFRESH_INTERVAL_S=30` steuert das Hintergrund-Leseintervall; `PRODUCT_CATALOG_STALE_AFTER_S=300` steuert die Katalogfrische unabhängig vom Live-Auftragsstatus. Beide Werte müssen endlich und positiv sein, die Veraltungsgrenze größer als das Abgleichintervall. Ein Lesefehler sperrt Erstannahmen sofort; gespeicherte Daten bleiben bis zum erfolgreichen Abgleich erhalten. Zuerst Migration `plc_catalog_01` ausführen. `python -m app.scripts.sync_product_catalog` importiert einmalig ohne Auftragsworker.
+diff --git a/OPC-UA-Integration-English.md b/OPC-UA-Integration-English.md
+index 226e52d..0043d60 100644
+--- a/OPC-UA-Integration-English.md
++++ b/OPC-UA-Integration-English.md
+@@ -17,7 +17,6 @@ This page briefly summarizes the current state. The **authoritative, complete**
+ 
+ ## Open points (as of the code + `docs/opc-ua-integration.md`)
+ 
+-- The product catalog reader for `DB_MES_Schnittstelle.Produktspezifikationen` is **not implemented yet** — before implementing it, the real browse names/field bounds must be checked.
+ - It is currently **not confirmed** that the PLC provides a result counter or a good/bad field per product; without confirmation from the control group, produced/good/defective quantities remain unknown (see the good/bad logic in [Data Model and API](Data-Model-and-API-English)).
+ - A live-observed, cycling feedback sequence (`0→1→5→0→1→5…`) during a test delivery is **not proven fixed by backend changes** — no further live deliveries until this is clarified with the control team.
+ 
+@@ -28,3 +27,11 @@ The order handshake above only covers `/productionorder` and `/deliveryorder`. T
+ ## Testing without real equipment
+ 
+ The VS Code launch profile **"Backend (FastAPI, PLC debugging)"** (`.vscode/launch.json`) starts the server **without** `--reload` (a reload would cancel running worker tasks). Example order: `backend/examples/production-order.json`. Local regression tests (simulated PLC, no plant contact): `cd backend && python3 -m pytest -q`.
++
++## Persistent product catalog (Issue #30, October 15, 2026)
++
++The PDF (pages 96–97) and a read-only live browse confirm `DB_MES_Schnittstelle.Produktspezifikation` (singular), six products (IDs 1–6), all specification fields and 33 queue slots per type. Skip catalog index 0; queue index 0 remains valid. IDs come from `ProduktID`, not the array index.
++
++Migration `plc_catalog_01` adds `plc_catalog_product` and `plc_catalog_state`. Complete snapshots atomically update ID, text, source index, specification and availability; absent products are deactivated. Errors preserve last successful data and block new admission. `Article` is separate because the PLC has no prices; stored orders retain their original input.
++
++The backend refreshes at startup and after each interval (default 30 s) on a dedicated read connection. The separate stale limit is 300 s. Preparation and order POSTs use only the DB mirror. `POST /orders/catalog/sync?order_type=production|delivery` explicitly refreshes it without order submission or PLC writes. A worker-free one-off import is available as `python -m app.scripts.sync_product_catalog` in `backend/` after migration. No PLC writes or order starts were performed during catalog verification. Plant acceptance of new orders remains open.
+diff --git a/OPC-UA-Integration.md b/OPC-UA-Integration.md
+index e484929..fb32e2e 100644
+--- a/OPC-UA-Integration.md
++++ b/OPC-UA-Integration.md
+@@ -17,7 +17,6 @@ Diese Seite fasst den aktuellen Stand kurz zusammen. Die **maßgebliche, vollst
+ 
+ ## Offene Punkte (Stand Code + `docs/opc-ua-integration.md`)
+ 
+-- Der Produktkatalog-Reader für `DB_MES_Schnittstelle.Produktspezifikationen` ist **noch nicht implementiert** — vor einer Umsetzung müssen die echten Browse-Namen/Feldgrenzen geprüft werden.
+ - Es ist aktuell **nicht bestätigt**, dass die SPS einen Ergebnis-Zähler oder ein Gut/Schlecht-Feld pro Produkt liefert; ohne Bestätigung der Steuerungsgruppe bleiben produzierte/gute/defekte Mengen unbekannt (siehe Gut/Schlecht-Logik in [Datenmodell und API](Datenmodell-und-API)).
+ - Eine live beobachtete, durchlaufende Feedback-Sequenz (`0→1→5→0→1→5…`) bei einer Testauslieferung ist **nicht durch Backend-Änderungen als behoben belegt** — weitere Live-Auslieferungen erst nach Klärung mit dem Steuerungsteam.
+ 
+@@ -28,3 +27,11 @@ Der Auftrags-Handshake oben betrifft nur `/productionorder` und `/deliveryorder`
+ ## Testen ohne echte Anlage
+ 
+ VS-Code-Launch-Profil **„Backend (FastAPI, PLC debugging)“** (`.vscode/launch.json`) startet den Server **ohne** `--reload` (ein Reload würde laufende Worker-Tasks abbrechen). Beispielauftrag: `backend/examples/production-order.json`. Lokale Regressionstests (simulierte PLC, kein Anlagenkontakt): `cd backend && python3 -m pytest -q`.
++
++## Persistenter Produktkatalog (Issue #30, 15.10.2026)
++
++PDF (Seiten 96–97) und lesende Anlagenprüfung bestätigen `DB_MES_Schnittstelle.Produktspezifikation` (Singular), sechs Produkte (IDs 1–6), sämtliche Bauplanfelder und 33 Queue-Slots je Auftragsart. Katalogindex 0 auslassen; Queueindex 0 bleibt gültig. IDs stammen aus `ProduktID`, nicht aus dem Arrayindex.
++
++Migration `plc_catalog_01` ergänzt `plc_catalog_product` und `plc_catalog_state`. Vollständige Snapshots aktualisieren ID, Text, Quellindex, Bauplan und Verfügbarkeit atomar; fehlende Produkte werden deaktiviert. Fehler erhalten die letzten gültigen Daten und sperren neue Annahmen. `Article` bleibt separat, da die SPS keine Preise liefert; gespeicherte Aufträge behalten ihre ursprünglichen Eingaben.
++
++Der Backendabgleich läuft beim Start und nach jedem Intervall (Standard 30 s) über eine getrennte Leseverbindung. Die separate Veraltungsgrenze beträgt 300 s. Vorbereitung und Auftrags-POST lesen ausschließlich den DB-Spiegel. `POST /orders/catalog/sync?order_type=production|delivery` aktualisiert ihn ausdrücklich ohne Auftrag oder SPS-Schreiben. Ein workerfreier einmaliger Import ist nach Migration mit `python -m app.scripts.sync_product_catalog` in `backend/` möglich. Bei der Katalogprüfung wurden keine SPS-Werte geschrieben und keine Aufträge gestartet. Die Anlagenabnahme neuer Aufträge bleibt offen.

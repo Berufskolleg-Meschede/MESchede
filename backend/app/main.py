@@ -54,6 +54,7 @@ def create_app(worker: OrderWorkerHost | None = None, storage_gateway: PlcStorag
                 OrderRepository(engine),
                 PlcOrderGateway(os.getenv("OPC_UA_URL", ""), settings_provider=settings_service.get_current_settings),
                 settings,
+                catalog_gateway=PlcOrderGateway(os.getenv("OPC_UA_URL", ""), settings_provider=settings_service.get_current_settings),
             )
         application.state.order_worker = host
         production_queue.bind_worker(host)

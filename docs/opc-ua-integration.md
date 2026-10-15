@@ -44,18 +44,66 @@ fields: the confirmed protocol only needs the MES command and MES feedback.
 
 ## Product catalog: single source of truth
 
-On October 13, 2026, the team reported that `DB_MES_Schnittstelle` also
-contains a `Produktspezifikationen` array with all product information.
-Use `DB_MES_Schnittstelle.Produktspezifikationen` as the authoritative source
-for the MES product catalog, including product selection and validation.
+### Verified read contract (October 15, 2026)
 
-- Array index `0` is empty and must be skipped when reading the catalog.
-  Product entries start at index `1`.
-- This applies to the product specifications array; the order's
-  `Produktqueue` still starts at index `0` as documented above.
-- The catalog reader is not implemented yet. Before implementing it, inspect
-  the actual OPC UA browse names, fields, array bounds, and product identifiers;
-  do not assume that an array index equals a `ProduktID`.
+The supplied `SchnittstelleMES.pdf`, pages 96–97, and a read-only live browse
+confirm **`DB_MES_Schnittstelle.Produktspezifikation`** (singular).
+`Produktspezifikationen` remains a compatibility alias. Skip the empty catalog
+index 0; read actual `ProduktID` and `Produkttext`, never derive IDs from indices.
+The order `Produktqueue` still starts at 0.
+
+| ID | Product text |
+| --- | --- |
+| 1 | Salzstreuer, Rot |
+| 2 | Salzstreuer, Silber |
+| 3 | Salzstreuer, Schwarz |
+| 4 | Pfefferstreuer, Rot |
+| 5 | Pfefferstreuer, Silber |
+| 6 | Pfefferstreuer, Schwarz |
+
+The reader imports `Gehaeuse`, `Deckel`, `Hoehe`, `GehaeuseFarbe`,
+`DeckelFarbe` (Byte) and `DrehmomentSoll`, `HoeheMin`, `HoeheMax`,
+`DrehmomentMin`, `DrehmomentMax`, `GewichtMin`, `GewichtMax` (Float).
+The latter fields were all 0.0 during the live read; no measured quality or
+engineering limits are inferred from these values. Both order queues expose
+slots 0–32, giving capacity 33 per type (model ceiling 255).
+
+Migration `plc_catalog_01` adds a persistent mirror: `plc_catalog_product`
+contains ID, text, source index, specifications, availability and observation
+time. `plc_catalog_state` contains per-type capacity, last success/attempt and
+error. `Article` is separate because its mandatory prices are absent in the PLC.
+A complete valid snapshot is committed atomically and idempotently. Missing IDs
+are deactivated rather than deleted. Errors preserve the last successful data
+and timestamp; old order inputs are never rewritten.
+
+The backend synchronizes at startup and after each configured interval
+(`PRODUCT_CATALOG_REFRESH_INTERVAL_S`, default 30 seconds) using a dedicated
+read connection, separate from the order handshake. A failure blocks new
+admission until a successful sync. Data older than
+`PRODUCT_CATALOG_STALE_AFTER_S` (default 300 seconds) is also blocked.
+These intervals are independent of the shorter live-order status intervals.
+
+`GET /orders/input-context?order_type=production` (or `delivery`) and first
+order admission use only the stored catalog, without opening a PLC connection.
+`POST /orders/catalog/sync?order_type=production` (or `delivery`) explicitly
+reads the PLC and updates the mirror; it does not submit orders or write PLC
+nodes. In the entry dialog this is **Produktdaten abgleichen**.
+
+For a one-off import without dispatching existing orders, apply the migration
+then run `python -m app.scripts.sync_product_catalog` from `backend/`.
+It loads persisted node settings, reads the PLC, writes only catalog tables and
+closes its connection. Do not start the application just to run an import:
+application startup also starts the existing order worker.
+
+The preparation also provides independent unused identifier suggestions and
+local plant date/time (`ORDER_PLANT_TIMEZONE`, default `Europe/Berlin`).
+`Startzeit` has no offset. The UI expands product rows into units and increments
+serial numbers from the editable start within each order. Existing identical
+orders are resolved before validating changing catalog data.
+
+The catalog read is live-verified. No order start or PLC write was performed
+for this catalog import. Plant acceptance of the new UI and the semantics of
+optional input defaults remain separate from catalog verification.
 
 ## Order sequence
 
@@ -143,21 +191,6 @@ commissioning logic must respect the count and requested product/serial
 number, and reliably signal completed feedback `5`. Do not perform further
 live deliveries until this discrepancy is resolved: a cycling feedback signal
 cannot safely distinguish a real completion from an unrelated transition.
-
-## Product catalog: single source of truth
-
-On October 13, 2026, the team reported that `DB_MES_Schnittstelle` also
-contains a `Produktspezifikationen` array with all product information.
-Use `DB_MES_Schnittstelle.Produktspezifikationen` as the authoritative source
-for the MES product catalog, including product selection and validation.
-
-- Array index `0` is empty and must be skipped when reading the catalog.
-  Product entries start at index `1`.
-- This applies to the product specifications array; the order's
-  `Produktqueue` still starts at index `0` as documented above.
-- The catalog reader is not implemented yet. Before implementing it, inspect
-  the actual OPC UA browse names, fields, array bounds, and product identifiers;
-  do not assume that an array index equals a `ProduktID`.
 
 ## Analytics data currently confirmed
 

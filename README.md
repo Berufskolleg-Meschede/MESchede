@@ -153,15 +153,31 @@ This is what the frontend's `/inventory` page actually polls. The node names are
 |--------|------------------------------------------|---------------------------------------|
 | GET    | `/productionorder/` · `/deliveryorder/` | Paginated, searchable, status-filterable order list |
 | GET    | `/productionorder/queue-status` · `/deliveryorder/queue-status` | Worker/queue diagnostics (DB only, no PLC contact) |
-| GET    | `/productionorder/{order_id}` · `/deliveryorder/{order_id}` | Full order/run detail, including per-product-unit results |
-| POST   | `/productionorder/` · `/deliveryorder/` | Admit a new order → **202 Accepted** (durable admission, not completion); **503** if the order worker isn't running |
+| GET    | `/productionorder/{order_id}` · `/deliveryorder/{order_id}` | Order/run detail and normalized `mes_auftrag` input for admission reconciliation; includes per-unit results and refresh intervals |
+| POST   | `/productionorder/` · `/deliveryorder/` | Admit an order → **202 Accepted** after commit; first admission requires a fresh valid PLC catalog and sufficient queue capacity; **503** when prerequisites are unavailable |
 
 ### Combined overview & manual review
 
 | Method | Endpoint                               | Description                          |
 |--------|------------------------------------------|---------------------------------------|
 | GET    | `/orders/overview`                      | Combined production + delivery summary, dispatch state, PLC source health, active/waiting orders — stored data only |
+| GET    | `/orders/input-context?order_type=production` (or `delivery`) | Read-only preparation: independent unused identifiers, local plant date/time, product catalog, source availability and slot capacity |
+| POST   | `/orders/catalog/sync?order_type=production` (or `delivery`) | Read the PLC catalog and persist a complete snapshot; never submits an order or writes PLC nodes |
 | POST   | `/orders/runs/{run_id}/reviews`         | Submit a manual outcome (completed/interrupted/unknown) and quantities for a run; optimistic-concurrency protected (`expected_version`) and idempotent per `request_id` |
+
+### Manual order entry (Issue #30)
+
+Both order pages now offer **Neuer Auftrag**, multiple product rows, separate editable business and PLC identifiers, and a summary before admission. Serials increase across all rows from an editable start number within that order. Customer number is optional; priority and parameters have editable model defaults. `ORDER_PLANT_TIMEZONE` defaults to `Europe/Berlin`; the UI submits local date/time without a timezone offset. These input timestamps do not introduce scheduling or prove a PLC start.
+
+`202` confirms durable admission only. The UI reloads the list and offers an independently refreshed detail. Before sending, it saves the immutable attempt in session storage. After an uncertain response or reload it checks the matching detail first; only a reliable `404` allows an explicit retry of the identical input. Identical existing orders are resolved before catalog validation, so a subsequent catalog outage does not invalidate their admission. Backend validation retains the shared FIFO and review/start locks.
+
+On October 15, 2026, the interface PDF (pages 96–97) and a read-only live browse confirmed **`DB_MES_Schnittstelle.Produktspezifikation`** (singular), six products (IDs 1–6), and 33 queue slots per order type. The reader skips catalog index 0, reads the actual ID/text and all specification fields, and measures contiguous queue slots starting at 0. `Produktspezifikationen` remains a compatibility alias.
+
+Migration `plc_catalog_01` adds `plc_catalog_product` (ID, text, source index, specification, availability, observation time) and `plc_catalog_state` (per-type capacity and synchronization status). These mirror PLC data independently of `Article`, which requires prices the PLC does not supply. Complete snapshots are imported atomically; missing products are deactivated, historical orders retain their original input. Errors preserve the last successful data and block first admission until a successful refresh. A snapshot older than `PRODUCT_CATALOG_STALE_AFTER_S` (default 300 seconds) is also unavailable for new admission.
+
+The backend refreshes the catalog at startup and after each `PRODUCT_CATALOG_REFRESH_INTERVAL_S` interval (default 30 seconds), using a dedicated read connection so catalog reads do not delay order handshakes. Preparation and order POSTs use the persisted catalog without their own PLC calls. **Produktdaten abgleichen** explicitly requests another sync. To import once **without starting the order worker**, run `python -m app.scripts.sync_product_catalog` from `backend/` after migration. It loads configured node names and reads the PLC, then writes only the catalog tables. Real order acceptance on the plant remains pending. See [the Spec](docs/specs/issue-30-manual-order-start.md) and [implementation status](docs/plans/issue-30-manual-order-start.md).
+
+Browser tests use an isolated production build (`MES_NEXT_DIST_DIR=.next/issue30-tests`, webpack) against a local HTTP fixture. Normal development continues to use `.next`.
 
 ### Settings
 

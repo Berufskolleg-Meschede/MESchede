@@ -20,7 +20,8 @@ def migrate(engine, revision):
 def test_fresh_migration_creates_order_domain_and_initial_state(isolated_postgres_engine):
     migrate(isolated_postgres_engine, 'head')
     names = set(inspect(isolated_postgres_engine).get_table_names())
-    assert {'mes_order', 'order_run', 'product_unit', 'run_review', 'dispatch_state', 'plc_source_state'} <= names
+    assert {'mes_order', 'order_run', 'product_unit', 'run_review', 'dispatch_state', 'plc_source_state',
+            'plc_catalog_product', 'plc_catalog_state'} <= names
     with isolated_postgres_engine.connect() as connection:
         assert connection.execute(text('SELECT accepted_sequence FROM dispatch_state WHERE id=1')).scalar_one() == 0
         assert connection.execute(text('SELECT COUNT(*) FROM plc_source_state')).scalar_one() == 2

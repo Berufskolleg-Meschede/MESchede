@@ -14,7 +14,7 @@ for (const [kind, title] of [['production', 'Fertigungsaufträge'], ['delivery',
     await expect(page.getByText('Laufprüfung erforderlich · neue Starts gesperrt')).toBeVisible()
     await page.reload()
     await expect(page.getByRole('button', { name: 'Lauf prüfen', exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Neuer Auftrag' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Neuer Auftrag' })).toBeEnabled()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`${kind}.png`), fullPage: true })
   })

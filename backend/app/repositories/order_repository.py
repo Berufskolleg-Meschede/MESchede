@@ -87,7 +87,8 @@ class OrderRepository:
             select(ProductUnitRecord).where(ProductUnitRecord.run_id == run_id).order_by(ProductUnitRecord.queue_index)
         ).all())
 
-    def admit(self, kind: OrderType, payload: OrderPayload) -> StoredOrder:
+    def admit(self, kind: OrderType, payload: OrderPayload,
+              validate: Callable[[OrderPayload], None] | None = None) -> StoredOrder:
         """Bestätigt gleiche Annahmen erneut und lehnt widersprüchliche Inhalte ab."""
         normalized = payload.mes_auftrag.model_dump(mode="json")
         with self.transaction() as session:
@@ -101,6 +102,8 @@ class OrderRepository:
                 run = session.exec(select(OrderRunRecord).where(OrderRunRecord.order_ref == existing.id)).one()
                 return StoredOrder(existing, run, tuple(self.load_units(session, run.id)))
             self._check_plc_number(session, kind, payload.mes_auftrag.kopf.Auftragsnummer)
+            if validate is not None:
+                validate(payload)
             state.accepted_sequence += 1
             order = MesOrderRecord(
                 id=str(uuid4()), order_type=kind.value, order_id=payload.order_id,
@@ -115,6 +118,21 @@ class OrderRepository:
             units = self._create_units(run.id, payload)
             session.add_all(units)
             return StoredOrder(order, run, tuple(units))
+
+    def suggest_identifiers(self, kind: OrderType) -> tuple[str, int | None]:
+        """Liest unabhängige freie Vorschläge; die Annahmetransaktion reserviert später."""
+        with self.transaction() as session:
+            rows = session.exec(select(MesOrderRecord.order_id, MesOrderRecord.plc_order_number).where(
+                MesOrderRecord.order_type == kind.value,
+            )).all()
+        ids = {row[0] for row in rows}
+        numbers = {row[1] for row in rows}
+        candidate = 1
+        while str(candidate) in ids:
+            candidate += 1
+        plc_number = next((value for value in range(1, 65536) if value not in numbers),
+                          0 if 0 not in numbers else None)
+        return str(candidate), plc_number
 
     def _check_plc_number(self, session: Session, kind: OrderType, number: int) -> None:
         """Verhindert unbelegte Nummernwiederverwendung innerhalb desselben PLC-Slots."""

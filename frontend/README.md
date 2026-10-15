@@ -11,7 +11,19 @@ npm run dev
 
 Im normalen Betrieb kommen die Auftragsdaten ausschließlich vom FastAPI-Backend. Der serverseitige Proxy `/api/mes/*` verwendet `MES_BACKEND_URL`, standardmäßig `http://127.0.0.1:8000`. Eine Vorlage steht in `.env.example`; bei Bedarf nach `.env.local` kopieren. Im Produktions-Compose wird `http://backend:8000` gesetzt. Browser benötigen nur Zugriff auf das Frontend.
 
-Bei API-Ausfall bleiben letzte Daten mit Fehler-/Aktualitätshinweis sichtbar. Ohne erste Daten erscheinen unbekannte Werte; es gibt keinen automatischen Demodaten-Fallback. Ein Browserreload entfernt keine dauerhaft gespeicherten Reviews. Manuelle Erstellung und Auslösung bleiben Issue 30.
+Bei API-Ausfall bleiben letzte Daten mit Fehler-/Aktualitätshinweis sichtbar. Ohne erste Daten erscheinen unbekannte Werte; es gibt keinen automatischen Demodaten-Fallback. Ein Browserreload entfernt keine dauerhaft gespeicherten Reviews.
+
+## Aufträge manuell erfassen (Issue #30)
+
+Auf beiden Auftragsseiten öffnet **Neuer Auftrag** die gemeinsame Erfassung. Sie unterstützt mehrere Produktzeilen mit Menge, getrennte editierbare Vorschläge für Auftrag-ID und PLC-Auftragsnummer sowie eine editierbare Seriennummernstartnummer. Die Seriennummern laufen innerhalb dieses Auftrags über alle Zeilen hinweg fortlaufend. Datum und Uhrzeit kommen aus der Anlagenzeitzone; die Übertragung erfolgt ohne Zeitzonenoffset. Kundennummer ist optional; Priorität und Parameter sind unter **Weitere Angaben** editierbar.
+
+Vor **Auftrag annehmen** zeigt **Auftrag prüfen** den vollständigen Inhalt. Während des Sendens sind Änderungen und Mehrfachbestätigung gesperrt. `202` bestätigt ausschließlich Speicherung und Einreihung. Übersicht und Auftragsdetail werden anschließend unabhängig aktualisiert. Ein verlorenes Requestergebnis oder Reload führt zuerst zum gespeicherten Inhaltsabgleich; eine Wiederholung verändert weder IDs noch Zeitwerte oder Seriennummern.
+
+Die Vorbereitung nutzt `GET /orders/input-context?order_type=production` beziehungsweise `delivery` und liest den persistenten DB-Spiegel des SPS-Katalogs. Der Hintergrundabgleich liest beim Backendstart und anschließend standardmäßig alle 30 Sekunden; **Produktdaten abgleichen** fordert mit `POST /orders/catalog/sync` zusätzlich einen lesenden Abgleich an. Fehler oder ein mehr als 300 Sekunden alter Stand sperren neue Aufträge; gespeicherte Produkte bleiben erhalten. Auch die Auftragsannahme validiert ausschließlich gegen den DB-Katalog.
+
+Am 15.10.2026 wurden der tatsächliche Knoten `DB_MES_Schnittstelle.Produktspezifikation`, die sechs Produkte (IDs 1–6), sämtliche Bauplanfelder und jeweils 33 Queue-Slots an der Anlage lesend bestätigt. Die Anlagenabnahme echter neuer Aufträge bleibt offen. Es gibt keinen Ersatz durch die alten Mock-Artikel. [Spec und Einschränkungen](../docs/specs/issue-30-manual-order-start.md).
+
+Browserprüfungen bauen in `.next/issue30-tests` und starten dort einen eigenen Produktionsserver gegen eine lokale HTTP-Fixture. Der normale Entwicklungsserver und sein Build werden nicht beendet oder ersetzt.
 
 Die Oberfläche verwendet Systemschriften und benötigt beim Start/Build keinen Fontdownload.
 

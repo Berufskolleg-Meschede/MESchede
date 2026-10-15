@@ -1,7 +1,9 @@
-import type { OrderPageData, OrderOverview, OrderType, RunReview, ReviewResult, OrderStatus, OrderRunView } from './types'
+import type { OrderPageData, OrderOverview, OrderType, RunReview, ReviewResult, OrderStatus, OrderDetailView,
+  OrderInputContext, OrderPayload, OrderAdmission } from './types'
 
 export class OrderApiError extends Error {
-  constructor(message: string, public readonly status: number) {
+  constructor(message: string, public readonly status: number,
+    public readonly fieldErrors: { loc: (string | number)[]; msg: string }[] = []) {
     super(message)
     this.name = 'OrderApiError'
   }
@@ -22,10 +24,11 @@ export class OrderApiClient {
     })
     if (!response.ok) {
       const body = await response.json().catch(() => null)
+      const fields = Array.isArray(body?.detail) ? body.detail : []
       const detail = typeof body?.detail === 'string' ? body.detail :
-        response.status === 422 ? 'Die Laufangaben sind ungültig. Bitte die Mengen prüfen.' :
+        response.status === 422 ? 'Die Angaben sind ungültig. Bitte die markierten Felder prüfen.' :
         'Die Auftragsdaten konnten nicht geladen werden. Bitte erneut versuchen.'
-      throw new OrderApiError(detail, response.status)
+      throw new OrderApiError(detail, response.status, fields)
     }
     return response.json()
   }
@@ -46,8 +49,22 @@ export class OrderApiClient {
     return this.request('/orders/overview', { signal })
   }
 
-  detail(type: OrderType, orderId: string): Promise<OrderRunView> {
-    return this.request(`/${type === 'production' ? 'productionorder' : 'deliveryorder'}/${encodeURIComponent(orderId)}`)
+  detail(type: OrderType, orderId: string, signal?: AbortSignal): Promise<OrderDetailView> {
+    return this.request(`/${type === 'production' ? 'productionorder' : 'deliveryorder'}/${encodeURIComponent(orderId)}`, { signal })
+  }
+
+  inputContext(type: OrderType, signal?: AbortSignal): Promise<OrderInputContext> {
+    return this.request(`/orders/input-context?order_type=${type}`, { signal })
+  }
+
+  synchronizeCatalog(type: OrderType): Promise<OrderInputContext> {
+    return this.request(`/orders/catalog/sync?order_type=${type}`, { method: 'POST' })
+  }
+
+  create(type: OrderType, data: OrderPayload): Promise<OrderAdmission> {
+    return this.request(`/${type === 'production' ? 'productionorder' : 'deliveryorder'}/`, {
+      method: 'POST', body: JSON.stringify(data),
+    })
   }
 
   review(runId: string, data: RunReview): Promise<ReviewResult> {

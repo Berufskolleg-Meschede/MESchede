@@ -40,7 +40,8 @@ def isolated_postgres_engine(request):
 def order_engine(isolated_postgres_engine):
     """Erzeugt nur die Auftragsdomäne im isolierten Schema."""
     engine = isolated_postgres_engine
-    names = {"mes_order", "order_run", "product_unit", "run_review", "dispatch_state", "plc_source_state"}
+    names = {"mes_order", "order_run", "product_unit", "run_review", "dispatch_state", "plc_source_state",
+             "plc_catalog_product", "plc_catalog_state"}
     tables = [table for table in SQLModel.metadata.sorted_tables if table.name in names]
     SQLModel.metadata.create_all(engine, tables=tables)
     return engine

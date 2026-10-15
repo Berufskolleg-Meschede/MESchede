@@ -223,3 +223,100 @@ Für jeden durch eine Spec entstehenden oder geänderten Test wird dieser Block 
 - **Prüft:** Rein lokaler API-Speicher, tatsächliche bestehende Seiten/Proxy, manuelle Mengen statt Doppelzählung, Reload, Reset und keine Vorschaukennzeichnung im normalen Modus.
 - **Ausführung:** `cd frontend; npm run test:preview`: 5 Speichertests und 2 Browserfälle bestanden. TypeScript/ESLint und Produktionsbuild erfolgreich; normaler Browserregressionslauf einschließlich fehlender Vorschaukennzeichnung: 22 Passed.
 - **Hinweis:** Wrapper braucht Node.js 22.14+ und bindet nur `127.0.0.1:3030`/`127.0.0.1:18030`. Kein echter PLC-/Persistenznachweis; Hauptspec bleibt wegen Anlagenabnahme Modified.
+
+## I30 – Erfassung und Queueaufbau
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-02, AC-16, AC-18 bis AC-20.
+- **State:** Passed
+- **Testdatei:** frontend/tests/manual-orders.spec.ts, backend/tests/test_order_input.py.
+- **Test:** Queueaufbau und kompletter Inhaltsvergleich beachten alle wirksamen Werte; Ungültige Menge und Seriennummernüberlauf bleiben vor dem POST sichtbar; test_serial_range_overflow_is_rejected_before_admission.
+- **Prüft:** Deterministische Zeilenexpansion, fortlaufende Seriennummern bis 65535, ungültige Bruchmengen und serverseitiger Seriennummernbereich.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Synthetische Produkte und keine echten Anlagenwerte.
+
+## I30 – Vorbelegung und Kopfvalidierung
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-06, AC-09 bis AC-12, AC-22.
+- **State:** Passed
+- **Testdatei:** backend/tests/test_order_input.py, frontend/tests/manual-orders.spec.ts.
+- **Test:** test_header_rejects_values_before_plc_write; test_plant_time_is_local_and_has_no_offset; test_reserved_ids_cannot_hide_the_order_detail; production: gemischter Auftrag wird geprüft und angenommen; delivery: gemischter Auftrag wird geprüft und angenommen.
+- **Prüft:** Anlagenzeitzone, offsetfreie Zeit, DATE-Grenzen, reservierte IDs, getrennte Identifikatoren, leere Kundennummer und editierte Prioritäts-/Parameterwerte.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Browserfälle verwenden America/New_York, während die Anlagenzeit Europe/Berlin ist. Kein Live-Nachweis der Anlagenzeitzone.
+
+## I30 – PLC-Katalog und nutzbare Kapazität
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-13 bis AC-15, AC-17, AC-21.
+- **State:** Passed
+- **Testdatei:** backend/tests/test_order_input.py, frontend/tests/manual-orders.spec.ts.
+- **Test:** test_catalog_uses_record_ids_skips_zero_and_counts_contiguous_slots; test_capacity_and_product_text_are_authoritative; test_catalog_failure_blocks_first_admission; test_product_id_requires_plc_integer; Unbekannter Katalog sperrt die Erfassung ohne Ersatzprodukte; Während ausbleibender Aktualisierung sperren veraltete Katalogdaten den Prüfschritt.
+- **Prüft:** Katalogindex 0 wird ausgelassen; ID 42 stammt aus Eintrag 1; Slotlücke begrenzt Kapazität; Texte und Ganzzahlen sind autoritativ; Quellenfehler und Veraltung sperren Annahme.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Ausschließlich synthetische OPC-UA-Knoten. Reale Feldnamen und Slotgrenzen sind auf Benutzerwunsch noch ungeprüft.
+
+## I30 – Vorschlagsrennen und dauerhafte Annahme
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-04, AC-05, AC-07, AC-08, AC-25, AC-26, AC-36.
+- **State:** Passed
+- **Testdatei:** backend/tests/test_order_input.py, backend/tests/test_order_repository.py, backend/tests/test_order_dispatch.py.
+- **Test:** test_input_context_is_read_only_and_suggests_independently; test_concurrent_free_number_suggestions_are_rechecked_at_admission; test_valid_admission_and_complete_detail_without_second_run; test_concurrent_identical_acceptances_persist_one_order; test_oldest_delivery_precedes_new_production_regardless_of_priority.
+- **Prüft:** Lesende unabhängige Vorschläge, gleichzeitiger Nummernkonflikt, beide POST-Wege, identische Wiederholung trotz Katalogausfall, Inhaltskonflikt und bestehendes globales FIFO.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Echte PostgreSQL-Locks in isolierten Testschemas; keine echte PLC und keine Projektdatenbank.
+
+## I30 – Vollständiger Inhaltsabgleich
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-27 bis AC-31.
+- **State:** Passed
+- **Testdatei:** frontend/tests/manual-orders.spec.ts.
+- **Test:** Verlorene Antwort wird ohne zweiten POST aus gespeichertem Inhalt aufgeklärt; Nach 404 wiederholt die UI exakt denselben Inhalt nach vorherigem GET; Abgleichausfall und Reload erzeugen keinen weiteren POST; Abweichender gespeicherter Kopfwert wird nicht als Annahme übernommen; Unvollständiger Detailinhalt bleibt unklar und gibt keinen neuen Entwurf frei; Speicherfehler verhindert den ersten POST.
+- **Prüft:** POST/GET-Reihenfolge, unveränderte Wiederholung, Reload ohne weiteren POST, Vollständigkeit des Inhalts und gesicherter Versuch vor dem ersten Senden.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Browsernachweis mit simulierten HTTP-Antworten; keine echte verlorene PLC-Antwort provoziert.
+
+## I30 – Bestätigung und Verfolgung im Browser
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-01, AC-03, AC-23, AC-24, AC-32 bis AC-35, AC-37, AC-40.
+- **State:** NotApplicable
+- **Testdatei:** frontend/tests/manual-orders.spec.ts, frontend/tests/orders.spec.ts, frontend/tests/proxy.spec.ts.
+- **Test:** production: gemischter Auftrag wird geprüft und angenommen; delivery: gemischter Auftrag wird geprüft und angenommen; Doppelklick und Escape während des Sendens verändern keinen Request; Belegter Konflikt erhält bearbeitbare Eingaben; Detailausfall erhält bestätigte Annahme und letzte Fakten ohne neuen POST; Dashboard kombiniert beide Bereiche und bleibt lesend.
+- **Prüft:** Zusammenfassung vor POST, Requestsperre, Annahme ohne behaupteten Start, Filterauflösung, gezieltes Detailpolling und Erhalt nach Nachladefehler.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Unit Tests sind dafür nicht ausreichend. Alternative Browserprüfung erfolgreich; NotApplicable bezeichnet nur die Unit-Prüfart, nicht einen fehlenden Browsernachweis. Reale Anlagenläufe bleiben offen.
+
+## I30 – Tastatur und schmale Dialoge
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`.
+- **Akzeptanzkriterium:** AC-38, AC-39.
+- **State:** NotApplicable
+- **Testdatei:** frontend/tests/manual-orders.spec.ts.
+- **Test:** Enter im Erfassungsschritt bestätigt keinen Auftrag und Abbrechen stellt Fokus wieder her; Ungültige Menge und Seriennummernüberlauf bleiben vor dem POST sichtbar; production: gemischter Auftrag wird geprüft und angenommen; delivery: gemischter Auftrag wird geprüft und angenommen.
+- **Prüft:** Fokus auf Feldfehler, Enter ohne POST, Fokusrestauration, scrollbar erreichbare Bestätigung und Dialogbreite bei 390×844.
+- **Ausführung:** Siehe gemeinsamer Ausführungsstand unten.
+- **Hinweis:** Alternative Browserprüfung und visuelle Kontrolle erfolgt; keine vollständige Assistenztechnik-/Projektgeräte-Zertifizierung.
+
+## Ausfuehrungsstand Issue 30
+
+- **Backend:** `/private/tmp/meschede-issue30/venv/bin/python -m pytest tests -q --tb=short --order-test-db-url=postgresql+psycopg2://mes_test:mes_test@127.0.0.1:55429/mes_test`, ausgeführt im Backendverzeichnis: **211 bestanden, 2 fehlgeschlagen** in 9,42 s. Alle **22** neuen parametrierten Erfassungsfälle bestanden.
+- **Bestehende Fehler:** `test_pages_filter_before_pagination_and_share_global_review` (aufgefüllte ID-Suche) und `test_message_id_can_supply_missing_event_id` (naiver Lagerzeitstempel). Beide gezielt gegen unveränderten HEAD in einer temporären Kopie reproduziert: dieselben zwei Fehler. Keine ungefragten Korrekturen daran.
+- **Browserregression:** `npx playwright test tests/manual-orders.spec.ts tests/orders.spec.ts tests/proxy.spec.ts`: **56 bestanden** in 20,1 s, eigener webpack-Produktionsbuild, Desktop und 390×844, manuelle Erfassung mit Browserzeitzone America/New_York. Enthält Nachladefehler und expliziten Produktkatalogabgleich ohne Auftrag auf Desktop und schmalem Bildschirm.
+- **TypeScript und Lint:** `npx tsc --noEmit` erfolgreich; ESLint auf den geänderten Frontenddateien erfolgreich. Bestehender Hinweis zu `baseline-browser-mapping`; keine aufgabenfremde Aktualisierung.
+- **Build/Ansicht:** Separater Turbopack-Produktionsbuild erfolgreich; abschließender Browserlauf verwendet erfolgreich webpack-Produktionsbuild ohne Hot Reload. Zusammenfassung auf Desktop/schmalem Bildschirm geprüft; schmaler Dialog scrollt zu Tabelle und Bestätigung.
+- **Testumgebung:** Bereits vorhandener isolierter Container `meschede-issue29-test-db`; keine Projektdaten als Testdatenbank. Das fehlende Paket `pika==1.3.2` wurde nur in einer temporären Python-Umgebung ergänzt.
+- **Anlage:** Am 15.10.2026 auf ausdrücklichen Benutzerauftrag Katalog und beide Queue-Kapazitäten rein lesend bestätigt und DB-Import ausgeführt: sechs Produkte, je 33 Slots. Keine PLC-Schreibzugriffe oder Testaufträge. Standardwertsemantik und Abnahme echter Aufträge bleiben offen.
+
+## I30 – Persistenter SPS-Produktkatalog
+
+- **Spec:** `../../docs/specs/issue-30-manual-order-start.md`, Ergänzung vom 15.10.2026.
+- **Akzeptanzkriterium:** CAT-01 bis CAT-07.
+- **State:** Passed
+- **Testdateien:** `backend/tests/test_product_catalog.py`, `test_order_input.py`, `test_order_migrations.py`, `test_worker_diagnostics.py`; `frontend/tests/manual-orders.spec.ts`.
+- **Prüft:** Idempotente Persistenz über Repository-Neustart, Bauplandaten, Umbenennung/Deaktivierung ohne Löschen, verspätete Snapshots, typspezifische Kapazitäten, Erhalt bei Fehlern, Veraltung, getrennte Gateway-Lebensdauer ohne Blockierung der Auftragsbeobachtung, rein DB-gestützte Annahme/Vorbereitung, expliziter Abgleich ohne Start, additive Migration und Browserbutton ohne Auftrags-POST.
+- **Ausführung:** Vollständige Backendregression: 211 bestanden, nur die beiden oben dokumentierten Bestandsfehler. Browser: 56 bestanden. TypeScript und ESLint auf geänderten Dateien erfolgreich. Migration zusätzlich auf lokaler Projektdatenbank angewendet; Katalogimport ohne Workerstart.
+- **Abgrenzung:** Ein live ausgelesener Katalog bestätigt keine erfolgreiche Produktion über die neue UI.

@@ -4,7 +4,7 @@ from datetime import timezone
 
 from app.domain.order_run import OrderRun, OrderType, RunPhase
 from app.models.order_dto import (
-    DispatchView, OrderPageView, OrderSummary, OrderView, OverviewView, ProductUnitView, SourceStatus,
+    DispatchView, OrderDetailView, OrderPageView, OrderSummary, OrderView, OverviewView, ProductUnitView, SourceStatus,
 )
 from app.models.plc_source_state_record import PlcSourceStateRecord
 from app.repositories.order_repository import OrderRepository, StoredOrder
@@ -156,10 +156,15 @@ class OrderQueryService:
             stale_after_s=self.settings.stale_after_s,
         )
 
-    def detail(self, kind: OrderType, order_id: str) -> OrderView:
+    def detail(self, kind: OrderType, order_id: str) -> OrderDetailView:
         """Sucht eine fachliche String-ID ausschließlich innerhalb ihres Auftragstyps."""
         item = self.repository.order_detail(kind, order_id)
         if item is None:
             raise LookupError("Der Auftrag ist nicht vorhanden.")
         stored, source = item
-        return self._view(stored, self._source(source), None)
+        return OrderDetailView(
+            **self._view(stored, self._source(source), None).model_dump(),
+            mes_auftrag=stored.order.payload,
+            refresh_interval_s=self.settings.refresh_interval_s,
+            stale_after_s=self.settings.stale_after_s,
+        )
