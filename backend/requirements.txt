@@ -6,7 +6,7 @@ asyncpg==0.31.0
 blinker==1.9.0
 certifi==2025.10.5
 click==8.3.0
-dnspython==2.8.0
+dnspython==2.9.0
 dotenv==0.9.9
 email-validator==2.3.0
 fastapi==0.143.1
